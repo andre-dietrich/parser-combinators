@@ -285,8 +285,8 @@ runParser p st s =
             Err ( state, stream, ms )
 
 
-{-| Unfortunatelly this is not a real lazy function anymore, since this
-functionality is not accessable anymore by ordinary developers. Use this
+{-| Unfortunately this is not a real lazy function anymore, since this
+functionality is not accessible anymore by ordinary developers. Use this
 function only to avoid "bad-recursion" errors or use the following example
 snippet in your code to circumvent this problem:
 
@@ -1022,7 +1022,7 @@ many1Till p =
             )
 
 
-{-| Parser zero or more occurences of one parser separated by another.
+{-| Parser zero or more occurrences of one parser separated by another.
 
     parse (sepBy (string ",") (string "a")) "b"
     -- Ok []
@@ -1039,14 +1039,14 @@ sepBy sep p =
     or (sepBy1 sep p) (succeed [])
 
 
-{-| Parse one or more occurences of one parser separated by another.
+{-| Parse one or more occurrences of one parser separated by another.
 -}
 sepBy1 : Parser s x -> Parser s a -> Parser s (List a)
 sepBy1 sep p =
     map (::) p |> andMap (many (sep |> keep p))
 
 
-{-| Parse zero or more occurences of one parser separated and
+{-| Parse zero or more occurrences of one parser separated and
 optionally ended by another.
 
     parse (sepEndBy (string ",") (string "a")) "a,a,a,"
@@ -1058,7 +1058,7 @@ sepEndBy sep p =
     or (sepEndBy1 sep p) (succeed [])
 
 
-{-| Parse one or more occurences of one parser separated and
+{-| Parse one or more occurrences of one parser separated and
 optionally ended by another.
 
     parse (sepEndBy1 (string ",") (string "a")) ""
@@ -1097,7 +1097,7 @@ skipMany1 p =
     many1 (skip p) |> onsuccess ()
 
 
-{-| Parse one or more occurences of `p` separated by `op`, recursively
+{-| Parse one or more occurrences of `p` separated by `op`, recursively
 apply all functions returned by `op` to the values returned by `p`. See
 the `examples/Calc.elm` file for an example.
 -}
@@ -1140,7 +1140,7 @@ chainr op p =
     andThen accumulate p
 
 
-{-| Parse `n` occurences of `p`.
+{-| Parse `n` occurrences of `p`.
 -}
 count : Int -> Parser s a -> Parser s (List a)
 count n p =

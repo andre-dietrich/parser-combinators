@@ -1,4 +1,4 @@
-module Combine.Char exposing (satisfy, char, anyChar, oneOf, noneOf, space, tab, newline, crlf, eol, lower, upper, digit, octDigit, hexDigit)
+module Combine.Char exposing (satisfy, char, anyChar, oneOf, noneOf, space, tab, newline, crlf, eol, lower, upper, digit, octDigit, hexDigit, alpha, alphaNum)
 
 {-| This module contains `Char`-specific Parsers.
 
@@ -10,7 +10,7 @@ much faster.
 
 # Parsers
 
-@docs satisfy, char, anyChar, oneOf, noneOf, space, tab, newline, crlf, eol, lower, upper, digit, octDigit, hexDigit
+@docs satisfy, char, anyChar, oneOf, noneOf, space, tab, newline, crlf, eol, lower, upper, digit, octDigit, hexDigit, alpha, alphaNum
 
 -}
 
@@ -51,11 +51,19 @@ satisfy pred =
 
 {-| Parse an exact character match.
 
-    parse (char 'a') "a" ==
-    -- Ok 'a'
+    parse (char 'a') "a" --> Ok 'a'
 
-    parse (char 'a') "b" ==
-    -- Err ["expected 'a'"]
+    parse (char 'a') "b" --> Err ["expected 'a'"]
+
+    -- You can write the expected result on the next line,
+
+    add 41 1
+    --> 42
+
+    -- You can write the expected result on the next line,
+
+    add 41 1
+    --> 42
 
 -}
 char : Char -> Parser s Char
@@ -116,6 +124,11 @@ noneOf cs =
 
 
 {-| Parse a space character.
+
+    parse space " " == Ok ' '
+
+    parse space "a" == Err [ "expected a space" ]
+
 -}
 space : Parser s Char
 space =
@@ -123,6 +136,11 @@ space =
 
 
 {-| Parse a `\t` character.
+
+    parse tab "\t" == Ok '\t'
+
+    parse tab "a" == Err [ "expected a tab" ]
+
 -}
 tab : Parser s Char
 tab =
@@ -130,6 +148,11 @@ tab =
 
 
 {-| Parse a `\n` character.
+
+    parse newline "\n" == Ok '\n'
+
+    parse newline "a" == Err [ "expected a newline" ]
+
 -}
 newline : Parser s Char
 newline =
@@ -137,6 +160,13 @@ newline =
 
 
 {-| Parse a `\r\n` sequence, returning a `\n` character.
+
+    parse crlf "\u{000D}\n" == Ok '\n'
+
+    parse crlf "\n" == Err [ "expected CRLF" ]
+
+    parse crlf "\u{000D}" == Err [ "expected CRLF" ]
+
 -}
 crlf : Parser s Char
 crlf =
@@ -144,6 +174,15 @@ crlf =
 
 
 {-| Parse an end of line character or sequence, returning a `\n` character.
+
+    parse eol "\n" == Ok '\n'
+
+    parse eol "\u{000D}\n" == Ok '\n'
+
+    parse eol "\u{000D}" == Ok '\n'
+
+    parse eol "a" == Err [ "expected an end of line character" ]
+
 -}
 eol : Parser s Char
 eol =
@@ -151,6 +190,11 @@ eol =
 
 
 {-| Parse any lowercase character.
+
+    parse lower "a" == Ok 'a'
+
+    parse lower "A" == Err [ "expected a lowercase character" ]
+
 -}
 lower : Parser s Char
 lower =
@@ -158,6 +202,11 @@ lower =
 
 
 {-| Parse any uppercase character.
+
+    parse upper "A" == Ok 'A'
+
+    parse upper "a" == Err [ "expected an uppercase character" ]
+
 -}
 upper : Parser s Char
 upper =
@@ -165,6 +214,13 @@ upper =
 
 
 {-| Parse any base 10 digit.
+
+    parse digit "0" == Ok '0'
+
+    parse digit "9" == Ok '9'
+
+    parse digit "a" == Err [ "expected a digit" ]
+
 -}
 digit : Parser s Char
 digit =
@@ -172,6 +228,13 @@ digit =
 
 
 {-| Parse any base 8 digit.
+
+    parse octDigit "0" == Ok '0'
+
+    parse octDigit "7" == Ok '7'
+
+    parse octDigit "8" == Err [ "expected an octal digit" ]
+
 -}
 octDigit : Parser s Char
 octDigit =
@@ -179,7 +242,48 @@ octDigit =
 
 
 {-| Parse any base 16 digit.
+
+    parse hexDigit "0" == Ok '0'
+
+    parse hexDigit "7" == Ok '7'
+
+    parse hexDigit "a" == Ok 'a'
+
+    parse hexDigit "f" == Ok 'f'
+
+    parse hexDigit "g" == Err [ "expected a hexadecimal digit" ]
+
 -}
 hexDigit : Parser s Char
 hexDigit =
     satisfy Char.isHexDigit |> onerror "expected a hexadecimal digit"
+
+
+{-| Parse any alphabetic character.
+
+    parse alpha "a" == Ok 'a'
+
+    parse alpha "A" == Ok 'A'
+
+    parse alpha "0" == Err [ "expected an alphabetic character" ]
+
+-}
+alpha : Parser s Char
+alpha =
+    satisfy Char.isAlpha |> onerror "expected an alphabetic character"
+
+
+{-| Parse any alphanumeric character.
+
+    parse alphaNum "a" == Ok 'a'
+
+    parse alphaNum "A" == Ok 'A'
+
+    parse alphaNum "0" == Ok '0'
+
+    parse alphaNum "-" == Err [ "expected an alphanumeric character" ]
+
+-}
+alphaNum : Parser s Char
+alphaNum =
+    satisfy Char.isAlphaNum |> onerror "expected an alphanumeric character"

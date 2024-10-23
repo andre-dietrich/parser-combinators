@@ -324,6 +324,15 @@ bimap fok ferr p =
 
 
 {-| Get the parser's state and pipe it into a parser.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> withState (\state -> succeed state))
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 withState : (s -> Parser s a) -> Parser s a
 withState f =
@@ -333,6 +342,15 @@ withState f =
 
 
 {-| Replace the parser's state.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> putState 42)
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 putState : s -> Parser s ()
 putState state =
@@ -342,6 +360,15 @@ putState state =
 
 
 {-| Modify the parser's state.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> modifyState ((+) 1))
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 modifyState : (s -> s) -> Parser s ()
 modifyState f =
@@ -351,6 +378,15 @@ modifyState f =
 
 
 {-| Get the current position in the input stream and pipe it into a parser.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> withLocation (\loc -> succeed loc))
+    in
+      parse parser "a"
+      -- Ok { source = "a", line = 0, column = 1 }
+
 -}
 withLocation : (ParseLocation -> Parser s a) -> Parser s a
 withLocation f =
@@ -360,6 +396,15 @@ withLocation f =
 
 
 {-| Get the current line and pipe it into a parser.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> withLine (\line -> succeed line))
+    in
+      parse parser "a"
+      -- Ok 0
+
 -}
 withLine : (Int -> Parser s a) -> Parser s a
 withLine f =
@@ -369,6 +414,15 @@ withLine f =
 
 
 {-| Get the current column and pipe it into a parser.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> withColumn (\column -> succeed column))
+    in
+      parse parser "a"
+      -- Ok 1
+
 -}
 withColumn : (Int -> Parser s a) -> Parser s a
 withColumn f =
@@ -379,6 +433,15 @@ withColumn f =
 
 {-| Get the current InputStream and pipe it into a parser,
 only for debugging purposes ...
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> withSourceLine (\line -> succeed line))
+    in
+      parse parser "a"
+      -- Ok "a"
+
 -}
 withSourceLine : (String -> Parser s a) -> Parser s a
 withSourceLine f =
@@ -388,6 +451,15 @@ withSourceLine f =
 
 
 {-| Get the current `(line, column)` in the input stream.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> withLocation (\loc -> succeed loc))
+    in
+      parse parser "a"
+      -- Ok { source = "a", line = 0, column = 1 }
+
 -}
 currentLocation : InputStream -> ParseLocation
 currentLocation stream =
@@ -418,6 +490,15 @@ currentLocation stream =
 
 
 {-| Get the current source line in the input stream.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> modifyInput String.toUpper)
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 currentSourceLine : InputStream -> String
 currentSourceLine =
@@ -425,6 +506,15 @@ currentSourceLine =
 
 
 {-| Get the current line in the input stream.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> modifyPosition ((+) 1))
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 currentLine : InputStream -> Int
 currentLine =
@@ -432,6 +522,15 @@ currentLine =
 
 
 {-| Get the current column in the input stream.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> modifyPosition ((+) 1))
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 currentColumn : InputStream -> Int
 currentColumn =
@@ -439,6 +538,15 @@ currentColumn =
 
 
 {-| Get the current string stream. That might be useful for applying memorization.
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> modifyInput String.toUpper)
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 currentStream : InputStream -> String
 currentStream =
@@ -446,6 +554,15 @@ currentStream =
 
 
 {-| Modify the parser's InputStream input (String).
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> modifyInput String.toUpper)
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 modifyInput : (String -> String) -> Parser s ()
 modifyInput f =
@@ -455,6 +572,15 @@ modifyInput f =
 
 
 {-| Modify the parser's InputStream position (Int).
+
+    let
+      parser =
+        string "a"
+          |> andThen (\_ -> modifyPosition ((+) 1))
+    in
+      parse parser "a"
+      -- Ok ()
+
 -}
 modifyPosition : (Int -> Int) -> Parser s ()
 modifyPosition f =
@@ -703,12 +829,12 @@ The rest is as follows. Regular expressions must match from the beginning
 of the input and their subgroups are ignored. A `^` is added implicitly to
 the beginning of every pattern unless one already exists.
 
-    parse (regexWith True False "a+") "aaaAAaAab"
+    parse (regexWith { caseInsensitive = True, multiline = False} "a+") "aaaAAaAab"
     -- Ok "aaaAAaAa"
 
 -}
-regexWith : Bool -> Bool -> String -> Parser s String
-regexWith caseInsensitive multiline =
+regexWith : { caseInsensitive : Bool, multiline : Bool } -> String -> Parser s String
+regexWith { caseInsensitive, multiline } =
     regexer
         (Regex.fromStringWith
             { caseInsensitive = caseInsensitive
@@ -727,12 +853,12 @@ The rest is as follows. Regular expressions must match from the beginning
 of the input and their subgroups are ignored. A `^` is added implicitly to
 the beginning of every pattern unless one already exists.
 
-    parse (regexWithSub True False "a+") "aaaAAaAab"
+    parse (regexWithSub { caseInsensitive = True, multiline = False } "a+") "aaaAAaAab"
     -- Ok ("aaaAAaAa", [])
 
 -}
-regexWithSub : Bool -> Bool -> String -> Parser s ( String, List (Maybe String) )
-regexWithSub caseInsensitive multiline =
+regexWithSub : { caseInsensitive : Bool, multiline : Bool } -> String -> Parser s ( String, List (Maybe String) )
+regexWithSub { caseInsensitive, multiline } =
     regexer
         (Regex.fromStringWith
             { caseInsensitive = caseInsensitive
@@ -833,6 +959,13 @@ end =
 
 
 {-| Apply a parser without consuming any input on success.
+
+    parse (whitespace1 |> keep (string "a")) " a"
+    -- Ok "a"
+
+    parse (whitespace1 |> keep (string "a")) "a"
+    -- Err ["expected whitespace"]
+
 -}
 lookAhead : Parser s a -> Parser s a
 lookAhead p =
@@ -1040,6 +1173,16 @@ sepBy sep p =
 
 
 {-| Parse one or more occurrences of one parser separated by another.
+
+    parse (sepBy1 (string ",") (string "a")) ""
+    -- Err ["expected \"a\""]
+
+    parse (sepBy1 (string ",") (string "a")) "a"
+    -- Ok ["a"]
+
+    parse (sepBy1 (string ",") (string "a")) "a,"
+    -- Ok ["a"]
+
 -}
 sepBy1 : Parser s x -> Parser s a -> Parser s (List a)
 sepBy1 sep p =
@@ -1077,6 +1220,13 @@ sepEndBy1 sep p =
 
 
 {-| Apply a parser and skip its result.
+
+    parse (skip (string "a")) "a"
+    -- Ok ()
+
+    parse (skip (string "a")) "b"
+    -- Err ["expected \"a\""]
+
 -}
 skip : Parser s x -> Parser s ()
 skip p =
@@ -1084,6 +1234,13 @@ skip p =
 
 
 {-| Apply a parser and skip its result many times.
+
+    parse (skipMany (string "a")) "aaa"
+    -- Ok ()
+
+    parse (skipMany (string "a")) ""
+    -- Ok ()
+
 -}
 skipMany : Parser s x -> Parser s ()
 skipMany p =
@@ -1091,6 +1248,13 @@ skipMany p =
 
 
 {-| Apply a parser and skip its result at least once.
+
+    parse (skipMany1 (string "a")) "a"
+    -- Ok ()
+
+    parse (skipMany1 (string "a")) ""
+    -- Err ["expected \"a\""]
+
 -}
 skipMany1 : Parser s x -> Parser s ()
 skipMany1 p =
@@ -1100,6 +1264,13 @@ skipMany1 p =
 {-| Parse one or more occurrences of `p` separated by `op`, recursively
 apply all functions returned by `op` to the values returned by `p`. See
 the `examples/Calc.elm` file for an example.
+
+    parse (chainl (string "+") (int)) "1+2+3"
+    -- Ok 6
+
+    parse (chainl (string "+") (int)) "1+2+"
+    -- Err ["expected an integer"]
+
 -}
 chainl : Parser s (a -> a -> a) -> Parser s a -> Parser s a
 chainl op p =
@@ -1121,6 +1292,10 @@ chainl op p =
 {-| Similar to `chainl` but functions of `op` are applied in
 right-associative order to the values of `p`. See the
 `examples/Python.elm` file for a usage example.
+
+    parse (chainr (string "a" |> keep (string "+")) (string "a")) "a+a+a"
+    -- Ok "a"
+
 -}
 chainr : Parser s (a -> a -> a) -> Parser s a -> Parser s a
 chainr op p =
@@ -1141,6 +1316,13 @@ chainr op p =
 
 
 {-| Parse `n` occurrences of `p`.
+
+    parse (count 3 (string "a")) "aaa"
+    -- Ok ["a", "a", "a"]
+
+    parse (count 3 (string "a")) "aa"
+    -- Err ["expected \"a\""]
+
 -}
 count : Int -> Parser s a -> Parser s (List a)
 count n p =
@@ -1172,6 +1354,13 @@ between lp rp p =
 
 
 {-| Parse something between parentheses.
+
+    parse (parens (string "hello")) "(hello)"
+    -- Ok "hello"
+
+    parse (parens (string "hello")) "(world)"
+    -- Err ["expected \"hello\""]
+
 -}
 parens : Parser s a -> Parser s a
 parens =
@@ -1179,6 +1368,13 @@ parens =
 
 
 {-| Parse something between braces `{}`.
+
+    parse (braces (string "hello")) "{hello}"
+    -- Ok "hello"
+
+    parse (braces (string "hello")) "{world}"
+    -- Err ["expected \"hello\""]
+
 -}
 braces : Parser s a -> Parser s a
 braces =
@@ -1186,6 +1382,13 @@ braces =
 
 
 {-| Parse something between square brackets `[]`.
+
+    parse (brackets (string "hello")) "[hello]"
+    -- Ok "hello"
+
+    parse (brackets (string "hello")) "[world]"
+    -- Err ["expected \"hello\""]
+
 -}
 brackets : Parser s a -> Parser s a
 brackets =

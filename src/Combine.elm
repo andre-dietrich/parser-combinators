@@ -2,10 +2,11 @@ module Combine exposing
     ( Parser, InputStream, ParseLocation, ParseContext, ParseResult, ParseError, ParseOk
     , parse, runParser
     , primitive, app, lazy
-    , fail, succeed, string, regex, regexSub, regexWith, regexWithSub, end, whitespace, whitespace1
+    , fail, succeed, string, end, whitespace, whitespace1
+    , regex, regexSub, regexWith, regexWithSub
     , map, onsuccess, mapError, onerror
     , andThen, andMap, sequence
-    , lookAhead, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, chainl, chainr, count, between, parens, braces, brackets, keep, ignore
+    , keep, ignore, lookAhead, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, chainl, chainr, count, between, parens, braces, brackets
     , withState, putState, modifyState, withLocation, withLine, withColumn, withSourceLine, modifyInput, putInput, modifyPosition, putPosition
     )
 
@@ -43,7 +44,12 @@ into concrete Elm values.
 
 ## Parsers
 
-@docs fail, succeed, string, regex, regexSub, regexWith, regexWithSub, end, whitespace, whitespace1
+@docs fail, succeed, string, end, whitespace, whitespace1
+
+
+### Regular Expressions
+
+@docs regex, regexSub, regexWith, regexWithSub
 
 
 ## Combinators
@@ -61,7 +67,7 @@ into concrete Elm values.
 
 ### Parser Combinators
 
-@docs lookAhead, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, chainl, chainr, count, between, parens, braces, brackets, keep, ignore
+@docs keep, ignore, lookAhead, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, chainl, chainr, count, between, parens, braces, brackets
 
 
 ### State Combinators
@@ -167,7 +173,7 @@ If you find yourself reaching for this function often consider opening
 a [Github issue][issues] with the library to have your custom Parsers
 included in the standard distribution.
 
-[issues]: https://github.com/elm-community/parser-combinators/issues
+[issues]: https://github.com/andre-dietrich/parser-combinators/issues
 
 -}
 primitive : (state -> InputStream -> ParseContext state res) -> Parser state res
@@ -326,12 +332,12 @@ bimap fok ferr p =
 {-| Get the parser's state and pipe it into a parser.
 
     let
-      parser =
-        string "a"
-          |> keep (withState (\state -> succeed state))
+        parser =
+            string "a"
+                |> keep (withState (\state -> succeed state))
     in
-      parse parser "a"
-      -- Ok ()
+    parse parser "a"
+    -- Ok ()
 
 -}
 withState : (s -> Parser s a) -> Parser s a
@@ -344,12 +350,12 @@ withState f =
 {-| Replace the parser's state.
 
     let
-      parser =
-        string "a"
-          |> andThen (\_ -> putState 42)
+        parser =
+            string "a"
+                |> andThen (\_ -> putState 42)
     in
-      parse parser "a"
-      -- Ok ()
+    parse parser "a"
+    -- Ok ()
 
 -}
 putState : s -> Parser s ()
@@ -362,12 +368,12 @@ putState state =
 {-| Modify the parser's state.
 
     let
-      parser =
-        string "a"
-          |> andThen (\_ -> modifyState ((+) 1))
+        parser =
+            string "a"
+                |> andThen (\_ -> modifyState ((+) 1))
     in
-      parse parser "a"
-      -- Ok ()
+    parse parser "a"
+    -- Ok ()
 
 -}
 modifyState : (s -> s) -> Parser s ()
@@ -380,12 +386,12 @@ modifyState f =
 {-| Get the current position in the input stream and pipe it into a parser.
 
     let
-      parser =
-        string "a"
-          |> keep (withLocation succeed)
+        parser =
+            string "a"
+                |> keep (withLocation succeed)
     in
-      parse parser "a"
-      -- Ok { source = "a", line = 0, column = 1 }
+    parse parser "a"
+    -- Ok { source = "a", line = 0, column = 1 }
 
 -}
 withLocation : (ParseLocation -> Parser s a) -> Parser s a
@@ -398,12 +404,12 @@ withLocation f =
 {-| Get the current line and pipe it into a parser.
 
     let
-      parser =
-        string "a\n\n"
-          |> keep (withLine succeed)
+        parser =
+            string "a\n\n"
+                |> keep (withLine succeed)
     in
-      parse parser "a\n\n"
-      -- Ok 2
+    parse parser "a\n\n"
+    -- Ok 2
 
 -}
 withLine : (Int -> Parser s a) -> Parser s a
@@ -416,12 +422,12 @@ withLine f =
 {-| Get the current column and pipe it into a parser.
 
     let
-      parser =
-        string "aaa"
-          |> keep (withColumn succeed)
+        parser =
+            string "aaa"
+                |> keep (withColumn succeed)
     in
-      parse parser "aaa"
-      -- Ok 3
+    parse parser "aaa"
+    -- Ok 3
 
 -}
 withColumn : (Int -> Parser s a) -> Parser s a
@@ -435,12 +441,12 @@ withColumn f =
 only for debugging purposes ...
 
     let
-      parser =
+        parser =
             string "a"
                 |> keep (withSourceLine succeed)
     in
-      parse parser "abc"
-      -- Ok "bc"
+    parse parser "abc"
+    -- Ok "bc"
 
 -}
 withSourceLine : (String -> Parser s a) -> Parser s a
@@ -503,8 +509,11 @@ currentColumn =
 
 {-| Modify the parser's current InputStream input (String).
 
-    parse (modifyInput String.toUpper
-            |> keep (many (string "A"))) "aaa"
+    parse
+        (modifyInput String.toUpper
+            |> keep (many (string "A"))
+        )
+        "aaa"
     -- Ok ["A","A","A"]
 
 -}
@@ -517,9 +526,12 @@ modifyInput f =
 
 {-| Replace the remaining input with a new string.
 
-    parse ( string "a"
+    parse
+        (string "a"
             |> ignore (putInput "AAA")
-            |> keep (many (string "A"))) "aaa"
+            |> keep (many (string "A"))
+        )
+        "aaa"
     -- Ok ["A","A","A"]
 
 -}
@@ -531,12 +543,12 @@ putInput i =
 {-| Modify the parser's InputStream position (Int).
 
     let
-      parser =
-        string "a"
-          |> ignore (modifyPosition ((+) 1000))
+        parser =
+            string "a"
+                |> ignore (modifyPosition ((+) 1000))
     in
-      parse parser "a"
-      -- Ok ((),{ data = "a", input = "", position = 1001 },"a")
+    parse parser "a"
+    -- Ok ((),{ data = "a", input = "", position = 1001 },"a")
 
 -}
 modifyPosition : (Int -> Int) -> Parser s ()
@@ -549,12 +561,12 @@ modifyPosition f =
 {-| Replace the parser position.
 
     let
-      parser =
-        string "a"
-          |> ignore (putPosition 1000)
+        parser =
+            string "a"
+                |> ignore (putPosition 1000)
     in
-      parse parser "a"
-      -- Ok ((),{ data = "a", input = "", position = 1000 },"a")
+    parse parser "a"
+    -- Ok ((),{ data = "a", input = "", position = 1000 },"a")
 
 -}
 putPosition : Int -> Parser s ()
@@ -810,10 +822,20 @@ The rest is as follows. Regular expressions must match from the beginning
 of the input and their subgroups are ignored. A `^` is added implicitly to
 the beginning of every pattern unless one already exists.
 
-    parse (regexWith { caseInsensitive = True, multiline = False} "a+") "AaaAAaAab"
+    parse
+        (regexWith
+            { caseInsensitive = True, multiline = False }
+            "a+"
+        )
+        "AaaAAaAab"
     -- Ok "AaaAAaAa"
 
-    parse (regexWith { caseInsensitive = False, multiline = False} "a+") "AaaAAaAab"
+    parse
+        (regexWith
+            { caseInsensitive = False, multiline = False }
+            "a+"
+        )
+        "AaaAAaAab"
     -- Err ["expected input matching Regexp /^a+/"]
 
 -}
@@ -837,10 +859,20 @@ The rest is as follows. Regular expressions must match from the beginning
 of the input and their subgroups are ignored. A `^` is added implicitly to
 the beginning of every pattern unless one already exists.
 
-    parse (regexWithSub { caseInsensitive = True, multiline = False } "a+") "AaaAAaAab"
+    parse
+        (regexWithSub
+            { caseInsensitive = True, multiline = False }
+            "a+"
+        )
+        "AaaAAaAab"
     -- Ok ("aaaAAaAa", [])
 
-    parse (regexWithSub { caseInsensitive = False, multiline = False } "a+") "AaaAAaAab"
+    parse
+        (regexWithSub
+            { caseInsensitive = False, multiline = False }
+            "a+"
+        )
+        "AaaAAaAab"
     -- Err ["expected input matching Regexp /^a+/"]
 
 -}

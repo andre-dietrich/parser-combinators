@@ -8,6 +8,7 @@ module Combine exposing
     , andThen, andMap, sequence
     , keep, ignore, lookAhead, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, chainl, chainr, count, between, parens, braces, brackets
     , withState, putState, modifyState, withLocation, withLine, withColumn, withSourceLine, modifyInput, putInput, modifyPosition, putPosition
+    , currentLocation, currentSourceLine, currentLine, currentColumn, currentStream
     )
 
 {-| This library provides facilities for parsing structured text data
@@ -73,6 +74,11 @@ into concrete Elm values.
 ### State Combinators
 
 @docs withState, putState, modifyState, withLocation, withLine, withColumn, withSourceLine, modifyInput, putInput, modifyPosition, putPosition
+
+
+### Miscellaneous
+
+@docs currentLocation, currentSourceLine, currentLine, currentColumn, currentStream
 
 -}
 
@@ -253,9 +259,10 @@ parse p =
 
     statefulInt : Parse Int Int
     statefulInt =
-      -- Parse an int, then increment the state and return the parsed
-      -- int.  It's important that we try to parse the int _first_
-      -- since modifying the state will always succeed.
+      -- Parse an int, then increment the state and return
+      -- the parsed int. It's important that we try to parse
+      -- the int _first_ since modifying the state will
+      -- always succeed.
       int |> ignore (modifyState ((+) 1))
 
     ints : Parse Int (List Int)
@@ -505,6 +512,13 @@ currentLine =
 currentColumn : InputStream -> Int
 currentColumn =
     currentLocation >> .column
+
+
+{-| Get the current string stream. That might be useful for applying memorization.
+-}
+currentStream : InputStream -> String
+currentStream =
+    .input
 
 
 {-| Modify the parser's current InputStream input (String).
@@ -1135,9 +1149,14 @@ many1 p =
 {-| Apply the first parser zero or more times until second parser
 succeeds. On success, the list of the first parser's results is returned.
 
-    parse ( string "<!--"
-              |> keep (manyTill anyChar (string "-->")
-              |> map String.fromList )
+    parse
+        (string "<!--"
+            |> keep
+                (manyTill anyChar (string "-->")
+                    |> map String.fromList
+                )
+        )
+        "<!--foo bar-->"
     -- Ok "foo bar"
 
 -}
@@ -1163,9 +1182,14 @@ manyTill p end_ =
 {-| Apply the first parser one or more times until second parser
 succeeds. On success, the list of the first parser's results is returned.
 
-    parse ( string "<!--"
-              |> keep (many1Till anyChar (string "-->")
-              |> map String.fromList )
+    parse
+        (string "<!--"
+            |> keep
+                (many1Till anyChar (string "-->")
+                    |> map String.fromList
+                )
+        )
+        "<!--foo bar-->"
     -- Ok "foo bar"
 
 -}
@@ -1390,12 +1414,20 @@ count n p =
 
 The parser
 
-    parse (between (string "(") (string ")") (string "a")) "(a)"
+    parse
+        (between
+            (string "(")
+            (string ")")
+            (string "a")
+        )
+        "(a)"
     -- Ok "a"
 
 is equivalent to the parser
 
-    string "(" |> keep (string "a") |> ignore (string ")")
+    string "("
+        |> keep (string "a")
+        |> ignore (string ")")
 
 -}
 between : Parser s l -> Parser s r -> Parser s a -> Parser s a
@@ -1447,10 +1479,18 @@ brackets =
 
 {-| Parse zero or more whitespace characters.
 
-    parse (whitespace |> keep (string "hello")) "hello"
+    parse
+        (whitespace
+            |> keep (string "hello")
+        )
+        "hello"
     -- Ok "hello"
 
-    parse (whitespace |> keep (string "hello")) "   hello"
+    parse
+        (whitespace
+            |> keep (string "hello")
+        )
+        "   hello"
     -- Ok "hello"
 
 -}
@@ -1461,11 +1501,19 @@ whitespace =
 
 {-| Parse one or more whitespace characters.
 
-    parse (whitespace1 |> keep (string "hello")) "hello"
-     -- Err ["whitespace"]
+    parse
+        (whitespace1
+            |> keep (string "hello")
+        )
+        "hello"
+    -- Err ["whitespace"]
 
-    parse (whitespace1 |> keep (string "hello")) "   hello"
-     -- Ok "hello"
+    parse
+        (whitespace1
+            |> keep (string "hello")
+        )
+        "   hello"
+    -- Ok "hello"
 
 -}
 whitespace1 : Parser s String

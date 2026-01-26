@@ -948,25 +948,22 @@ while pred =
                 Just ( h, rest ) ->
                     if pred h then
                         let
-                            c =
-                                String.cons h ""
-
                             pos =
                                 stream.position + 1
                         in
-                        accumulate (acc ++ c) state { stream | input = rest, position = pos }
+                        accumulate (h :: acc) state { stream | input = rest, position = pos }
 
                     else
-                        ( state, stream, acc )
+                        ( state, stream, String.fromList (List.reverse acc) )
 
                 Nothing ->
-                    ( state, stream, acc )
+                    ( state, stream, String.fromList (List.reverse acc) )
     in
     Parser <|
         \state stream ->
             let
                 ( rstate, rstream, res ) =
-                    accumulate "" state stream
+                    accumulate [] state stream
             in
             ( rstate, rstream, Ok res )
 

@@ -310,7 +310,7 @@ snippet in your code to circumvent this problem:
 lazy : (() -> Parser s a) -> Parser s a
 lazy t =
     --    RecursiveParser (L.lazy (\() -> app (t ())))
-    succeed () |> andThen t
+    Parser <| \state stream -> app (t ()) state stream
 
 
 {-| Transform both the result and error message of a parser.
@@ -1042,7 +1042,7 @@ or lp rp =
                             res
 
                         ( _, _, Err rms ) ->
-                            ( state, stream, Err (lms ++ rms) )
+                            ( state, stream, Err (List.foldl (::) lms rms |> List.reverse) )
 
 
 {-| Choose between a list of parsers.

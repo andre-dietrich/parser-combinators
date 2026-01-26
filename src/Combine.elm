@@ -1186,7 +1186,7 @@ manyTill p end_ =
                 ( estate, estream, Err ms ) ->
                     case app p state stream of
                         ( rstate, rstream, Ok res ) ->
-                            if stream.position == rstream.position then
+                            if stream == rstream then
                                 ( estate, estream, Err [ "manyTill: parser succeeded without consuming input" ] )
 
                             else

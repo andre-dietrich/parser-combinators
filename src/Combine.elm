@@ -1360,7 +1360,7 @@ chainl op p =
         accumulate x state stream =
             case app op state stream of
                 ( opstate, opstream, Ok f ) ->
-                    if stream.position == opstream.position then
+                    if stream == opstream then
                         ( opstate, opstream, Ok x )
 
                     else
@@ -1409,7 +1409,7 @@ chainr op p =
         accumulate x state stream =
             case app op state stream of
                 ( opstate, opstream, Ok f ) ->
-                    if stream.position == opstream.position then
+                    if stream == opstream then
                         ( opstate, opstream, Ok x )
 
                     else

@@ -1171,10 +1171,18 @@ manyTill p end_ =
                 ( estate, estream, Err ms ) ->
                     case app p state stream of
                         ( rstate, rstream, Ok res ) ->
-                            accumulate (res :: acc) rstate rstream
+                            if stream.position == rstream.position then
+                                ( estate, estream, Err [ "manyTill: parser succeeded without consuming input" ] )
 
-                        _ ->
-                            ( estate, estream, Err ms )
+                            else
+                                accumulate (res :: acc) rstate rstream
+
+                        ( pstate, pstream, Err _ ) ->
+                            if pstream.input == "" then
+                                ( estate, estream, Err [ "manyTill: reached end of input without finding end parser" ] )
+
+                            else
+                                ( estate, estream, Err ms )
     in
     Parser (accumulate [])
 

@@ -907,7 +907,7 @@ regexer :
     -> (Regex.Match -> res)
     -> String
     -> (state -> InputStream -> ( state, InputStream, ParseResult res ))
-regexer input output pat state stream =
+regexer input output pat =
     let
         pattern =
             if String.startsWith "^" pat then
@@ -915,23 +915,27 @@ regexer input output pat state stream =
 
             else
                 "^" ++ pat
+
+        compiledRegex =
+            input pattern |> Maybe.withDefault Regex.never
     in
-    case Regex.findAtMost 1 (input pattern |> Maybe.withDefault Regex.never) stream.input of
-        [ match ] ->
-            let
-                len =
-                    String.length match.match
+    \state stream ->
+        case Regex.findAtMost 1 compiledRegex stream.input of
+            [ match ] ->
+                let
+                    len =
+                        String.length match.match
 
-                rem =
-                    String.dropLeft len stream.input
+                    rem =
+                        String.dropLeft len stream.input
 
-                pos =
-                    stream.position + len
-            in
-            ( state, { stream | input = rem, position = pos }, Ok (output match) )
+                    pos =
+                        stream.position + len
+                in
+                ( state, { stream | input = rem, position = pos }, Ok (output match) )
 
-        _ ->
-            ( state, stream, Err [ "expected input matching Regexp /" ++ pattern ++ "/" ] )
+            _ ->
+                ( state, stream, Err [ "expected input matching Regexp /" ++ pattern ++ "/" ] )
 
 
 {-| Consume input while the predicate matches.

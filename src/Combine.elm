@@ -1356,18 +1356,31 @@ the `examples/Calc.elm` file for an example.
 chainl : Parser s (a -> a -> a) -> Parser s a -> Parser s a
 chainl op p =
     let
-        accumulate x =
-            succeed x
-                |> or
-                    (op
-                        |> andThen
-                            (\f ->
-                                p
-                                    |> andThen (\y -> accumulate (f x y))
-                            )
-                    )
+        accumulate x state stream =
+            case app op state stream of
+                ( opstate, opstream, Ok f ) ->
+                    if stream.position == opstream.position then
+                        ( opstate, opstream, Ok x )
+
+                    else
+                        case app p opstate opstream of
+                            ( pstate, pstream, Ok y ) ->
+                                accumulate (f x y) pstate pstream
+
+                            ( estate, estream, Err ms ) ->
+                                ( estate, estream, Err ms )
+
+                ( _, _, Err _ ) ->
+                    ( state, stream, Ok x )
     in
-    andThen accumulate p
+    Parser <|
+        \state stream ->
+            case app p state stream of
+                ( pstate, pstream, Ok x ) ->
+                    accumulate x pstate pstream
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )
 
 
 {-| Similar to `chainl` but functions of `op` are applied in
@@ -1392,19 +1405,36 @@ right-associative order to the values of `p`. See the
 chainr : Parser s (a -> a -> a) -> Parser s a -> Parser s a
 chainr op p =
     let
-        accumulate x =
-            succeed x
-                |> or
-                    (op
-                        |> andThen
-                            (\f ->
-                                p
-                                    |> andThen accumulate
-                                    |> andThen (\y -> succeed (f x y))
-                            )
-                    )
+        accumulate x state stream =
+            case app op state stream of
+                ( opstate, opstream, Ok f ) ->
+                    if stream.position == opstream.position then
+                        ( opstate, opstream, Ok x )
+
+                    else
+                        case app p opstate opstream of
+                            ( pstate, pstream, Ok y ) ->
+                                case accumulate y pstate pstream of
+                                    ( rstate, rstream, Ok z ) ->
+                                        ( rstate, rstream, Ok (f x z) )
+
+                                    err ->
+                                        err
+
+                            ( estate, estream, Err ms ) ->
+                                ( estate, estream, Err ms )
+
+                ( _, _, Err _ ) ->
+                    ( state, stream, Ok x )
     in
-    andThen accumulate p
+    Parser <|
+        \state stream ->
+            case app p state stream of
+                ( pstate, pstream, Ok x ) ->
+                    accumulate x pstate pstream
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )
 
 
 {-| Parse `n` occurrences of `p`.

@@ -1055,7 +1055,21 @@ or lp rp =
 -}
 choice : List (Parser s a) -> Parser s a
 choice xs =
-    List.foldr or emptyErr xs
+    let
+        tryParsers parsers state stream errors =
+            case parsers of
+                [] ->
+                    ( state, stream, Err (List.reverse errors) )
+
+                p :: rest ->
+                    case app p state stream of
+                        ( _, _, Ok _ ) as res ->
+                            res
+
+                        ( _, _, Err ms ) ->
+                            tryParsers rest state stream (List.foldl (::) errors ms)
+    in
+    Parser <| \state stream -> tryParsers xs state stream []
 
 
 {-| Return a default value when the given parser fails.

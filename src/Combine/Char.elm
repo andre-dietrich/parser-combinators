@@ -73,11 +73,9 @@ char c =
 
 charList : List Char -> String
 charList chars =
-    chars
-        |> List.map (\c -> "'" ++ String.fromChar c ++ "'")
-        |> List.intersperse ", "
-        |> String.concat
-        |> (\str -> "[" ++ str ++ "]")
+    "["
+        ++ String.join ", " (List.map (\c -> "'" ++ String.fromChar c ++ "'") chars)
+        ++ "]"
 
 
 {-| Parse any character.

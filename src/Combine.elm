@@ -1129,7 +1129,7 @@ many p =
         accumulate acc state stream =
             case app p state stream of
                 ( rstate, rstream, Ok res ) ->
-                    if stream == rstream then
+                    if stream.input == rstream.input then
                         ( rstate, rstream, List.reverse acc )
 
                     else
@@ -1186,7 +1186,7 @@ manyTill p end_ =
                 ( estate, estream, Err ms ) ->
                     case app p state stream of
                         ( rstate, rstream, Ok res ) ->
-                            if stream == rstream then
+                            if stream.input == rstream.input then
                                 ( estate, estream, Err [ "manyTill: parser succeeded without consuming input" ] )
 
                             else
@@ -1360,13 +1360,17 @@ chainl op p =
         accumulate x state stream =
             case app op state stream of
                 ( opstate, opstream, Ok f ) ->
-                    if stream == opstream then
+                    if stream.input == opstream.input then
                         ( opstate, opstream, Ok x )
 
                     else
                         case app p opstate opstream of
                             ( pstate, pstream, Ok y ) ->
-                                accumulate (f x y) pstate pstream
+                                if opstream.input == pstream.input then
+                                    ( pstate, pstream, Ok x )
+
+                                else
+                                    accumulate (f x y) pstate pstream
 
                             ( estate, estream, Err ms ) ->
                                 ( estate, estream, Err ms )
@@ -1409,18 +1413,22 @@ chainr op p =
         accumulate x state stream =
             case app op state stream of
                 ( opstate, opstream, Ok f ) ->
-                    if stream == opstream then
+                    if stream.input == opstream.input then
                         ( opstate, opstream, Ok x )
 
                     else
                         case app p opstate opstream of
                             ( pstate, pstream, Ok y ) ->
-                                case accumulate y pstate pstream of
-                                    ( rstate, rstream, Ok z ) ->
-                                        ( rstate, rstream, Ok (f x z) )
+                                if opstream.input == pstream.input then
+                                    ( pstate, pstream, Ok x )
 
-                                    err ->
-                                        err
+                                else
+                                    case accumulate y pstate pstream of
+                                        ( rstate, rstream, Ok z ) ->
+                                            ( rstate, rstream, Ok (f x z) )
+
+                                        err ->
+                                            err
 
                             ( estate, estream, Err ms ) ->
                                 ( estate, estream, Err ms )

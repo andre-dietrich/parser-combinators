@@ -1,7 +1,7 @@
 module Combine exposing
     ( Parser, InputStream, ParseLocation, ParseContext, ParseResult, ParseError, ParseOk
     , parse, runParser
-    , primitive, app, lazy
+    , primitive, app, lazy, trackedLazy
     , fail, succeed, string, end, whitespace, whitespace1
     , regex, regexSub, regexWith, regexWithSub
     , map, onsuccess, mapError, onerror
@@ -40,7 +40,7 @@ into concrete Elm values.
 
 ## Constructing Parsers
 
-@docs primitive, app, lazy
+@docs primitive, app, lazy, trackedLazy
 
 
 ## Parsers
@@ -82,6 +82,7 @@ into concrete Elm values.
 
 -}
 
+import Dict exposing (Dict)
 import Flip exposing (flip)
 import Regex
 import String
@@ -93,19 +94,20 @@ import String
   - `input` is the remainder after running a parse
   - `position` is the starting position of `input` in `data` after a parse
   - `lazyDepth` tracks consecutive lazy calls without input consumption (for infinite loop detection)
+  - `lazyTracking` tracks depth per unique lazy parser ID (for trackedLazy)
 
 -}
 type alias InputStream =
     { data : String
     , input : String
     , position : Int
-    , lazyDepth : Int
+    , lazyTracking : Dict String Int
     }
 
 
 initStream : String -> InputStream
 initStream s =
-    InputStream s s 0 0
+    InputStream s s 0 Dict.empty
 
 
 {-| A record representing the current parse location in an InputStream.
@@ -304,38 +306,77 @@ runParser p st s =
 functionality is not accessible anymore by ordinary developers. Use this
 function only to avoid "bad-recursion" errors or use the following example
 snippet in your code to circumvent this problem:
+recursion x =
+() -> recursion x
+-}
+lazy : (() -> Parser s a) -> Parser s a
+lazy t =
+    --    RecursiveParser (L.lazy (\() -> app (t ())))
+    Parser <| \state stream -> app (t ()) state stream
 
-    recursion x =
-        \() -> recursion x
 
-This function also includes infinite loop detection by tracking the depth
-of consecutive lazy calls without input consumption.
+{-| A more granular version of lazy that tracks recursion depth per unique parser ID.
+This allows different lazy parsers to have independent depth tracking and custom limits.
+
+Use this when you want fine-grained control over infinite loop detection:
+
+    myRecursiveParser : Parser s Expr
+    myRecursiveParser =
+        trackedLazy "expr-parser" 50 <|
+            \() ->
+                choice
+                    [ string "atom"
+                    , myRecursiveParser  -- Each ID has its own counter
+                    ]
+
+    parse myRecursiveParser "atom"
+    -- Ok "atom"
+
+Parameters:
+
+  - `id`: A unique identifier for this lazy parser (e.g., "json-object", "expression")
+  - `maxDepth`: Maximum recursion depth before triggering infinite loop detection
+  - `thunk`: The parser to evaluate lazily
 
 -}
-lazy : Maybe Int -> (() -> Parser s a) -> Parser s a
-lazy lazyDepth t =
-    --    RecursiveParser (L.lazy (\() -> app (t ())))
+trackedLazy : String -> Int -> (() -> Parser s a) -> Parser s a
+trackedLazy id maxDepth t =
     Parser <|
         \state stream ->
             let
-                depth =
-                    stream.lazyDepth
+                currentDepth =
+                    Dict.get id stream.lazyTracking |> Maybe.withDefault 0
             in
-            if depth > Maybe.withDefault 1000 lazyDepth then
-                ( state, stream, Err [ "infinite loop detected: lazy recursion depth exceeded" ] )
+            if currentDepth > maxDepth then
+                ( state
+                , stream
+                , Err [ "infinite loop detected: lazy parser '" ++ id ++ "' exceeded depth limit of " ++ String.fromInt maxDepth ]
+                )
 
             else
-                case app (t ()) state { stream | lazyDepth = depth + 1 } of
-                    ( rstate, rstream, Ok res ) ->
-                        -- Reset depth if we consumed input, otherwise keep incrementing
-                        if stream.input == rstream.input then
-                            ( rstate, { rstream | lazyDepth = depth + 1 }, Ok res )
+                let
+                    updatedTracking =
+                        Dict.insert id (currentDepth + 1) stream.lazyTracking
 
-                        else
-                            ( rstate, { rstream | lazyDepth = 0 }, Ok res )
+                    streamWithTracking =
+                        { stream | lazyTracking = updatedTracking }
+                in
+                case app (t ()) state streamWithTracking of
+                    ( rstate, rstream, Ok res ) ->
+                        -- Reset this parser's depth if input was consumed
+                        let
+                            finalTracking =
+                                if stream.input == rstream.input then
+                                    rstream.lazyTracking
+
+                                else
+                                    Dict.remove id rstream.lazyTracking
+                        in
+                        ( rstate, { rstream | lazyTracking = finalTracking }, Ok res )
 
                     ( estate, estream, Err ms ) ->
-                        ( estate, { estream | lazyDepth = 0 }, Err ms )
+                        -- Reset this parser's depth on error
+                        ( estate, { estream | lazyTracking = Dict.remove id estream.lazyTracking }, Err ms )
 
 
 {-| Transform both the result and error message of a parser.

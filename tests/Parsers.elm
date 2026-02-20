@@ -20,6 +20,7 @@ import Combine.Char
         , eol
         , space
         )
+import Dict
 import Expect
 import String
 import Test exposing (Test, describe, test)
@@ -102,22 +103,22 @@ sepEndBy1Suite =
             \() ->
                 Expect.equal
                     (parse commaSep "a,a,a")
-                    (Ok ( (), { data = "a,a,a", input = "", position = 5, lazyDepth = 0 }, [ "a", "a", "a" ] ))
+                    (Ok ( (), { data = "a,a,a", input = "", position = 5, lazyTracking = Dict.empty }, [ "a", "a", "a" ] ))
         , test "sepEndBy1 2" <|
             \() ->
                 Expect.equal
                     (parse commaSep "b")
-                    (Err ( (), { data = "b", input = "b", position = 0, lazyDepth = 0 }, [ "expected \"a\"" ] ))
+                    (Err ( (), { data = "b", input = "b", position = 0, lazyTracking = Dict.empty }, [ "expected \"a\"" ] ))
         , test "sepEndBy1 3" <|
             \() ->
                 Expect.equal
                     (parse commaSep "a,a,a,")
-                    (Ok ( (), { data = "a,a,a,", input = "", position = 6, lazyDepth = 0 }, [ "a", "a", "a" ] ))
+                    (Ok ( (), { data = "a,a,a,", input = "", position = 6, lazyTracking = Dict.empty }, [ "a", "a", "a" ] ))
         , test "sepEndBy1 4" <|
             \() ->
                 Expect.equal
                     (parse commaSep "a,a,b")
-                    (Ok ( (), { data = "a,a,b", input = "b", position = 4, lazyDepth = 0 }, [ "a", "a" ] ))
+                    (Ok ( (), { data = "a,a,b", input = "b", position = 4, lazyTracking = Dict.empty }, [ "a", "a" ] ))
         ]
 
 
@@ -128,20 +129,20 @@ sequenceSuite =
             \() ->
                 Expect.equal
                     (parse (sequence []) "a")
-                    (Ok ( (), { data = "a", input = "a", position = 0, lazyDepth = 0 }, [] ))
+                    (Ok ( (), { data = "a", input = "a", position = 0, lazyTracking = Dict.empty }, [] ))
         , test "one parser" <|
             \() ->
                 Expect.equal
                     (parse (sequence [ many <| string "a" ]) "aaaab")
-                    (Ok ( (), { data = "aaaab", input = "b", position = 4, lazyDepth = 0 }, [ [ "a", "a", "a", "a" ] ] ))
+                    (Ok ( (), { data = "aaaab", input = "b", position = 4, lazyTracking = Dict.empty }, [ [ "a", "a", "a", "a" ] ] ))
         , test "many parsers" <|
             \() ->
                 Expect.equal
                     (parse (sequence [ string "a", string "b", string "c" ]) "abc")
-                    (Ok ( (), { data = "abc", input = "", position = 3, lazyDepth = 0 }, [ "a", "b", "c" ] ))
+                    (Ok ( (), { data = "abc", input = "", position = 3, lazyTracking = Dict.empty }, [ "a", "b", "c" ] ))
         , test "many parsers failure" <|
             \() ->
                 Expect.equal
                     (parse (sequence [ string "a", string "b", string "c" ]) "abd")
-                    (Err ( (), { data = "abd", input = "d", position = 2, lazyDepth = 0 }, [ "expected \"c\"" ] ))
+                    (Err ( (), { data = "abd", input = "d", position = 2, lazyTracking = Dict.empty }, [ "expected \"c\"" ] ))
         ]

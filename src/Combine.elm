@@ -347,7 +347,7 @@ trackedLazy id maxDepth t =
                 currentDepth =
                     Dict.get id stream.lazyTracking |> Maybe.withDefault 0
             in
-            if currentDepth > maxDepth then
+            if currentDepth >= maxDepth then
                 ( state
                 , stream
                 , Err [ "infinite loop detected: lazy parser '" ++ id ++ "' exceeded depth limit of " ++ String.fromInt maxDepth ]
@@ -363,20 +363,28 @@ trackedLazy id maxDepth t =
                 in
                 case app (t ()) state streamWithTracking of
                     ( rstate, rstream, Ok res ) ->
-                        -- Reset this parser's depth if input was consumed
+                        -- Always restore depth to what it was before this call
                         let
                             finalTracking =
-                                if stream.input == rstream.input then
-                                    rstream.lazyTracking
+                                if currentDepth == 0 then
+                                    Dict.remove id rstream.lazyTracking
 
                                 else
-                                    Dict.remove id rstream.lazyTracking
+                                    Dict.insert id currentDepth rstream.lazyTracking
                         in
                         ( rstate, { rstream | lazyTracking = finalTracking }, Ok res )
 
                     ( estate, estream, Err ms ) ->
-                        -- Reset this parser's depth on error
-                        ( estate, { estream | lazyTracking = Dict.remove id estream.lazyTracking }, Err ms )
+                        -- Restore depth on error too
+                        let
+                            finalTracking =
+                                if currentDepth == 0 then
+                                    Dict.remove id estream.lazyTracking
+
+                                else
+                                    Dict.insert id currentDepth estream.lazyTracking
+                        in
+                        ( estate, { estream | lazyTracking = finalTracking }, Err ms )
 
 
 {-| Transform both the result and error message of a parser.

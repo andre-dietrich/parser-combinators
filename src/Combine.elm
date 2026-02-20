@@ -6,7 +6,7 @@ module Combine exposing
     , regex, regexSub, regexWith, regexWithSub
     , map, onsuccess, mapError, onerror
     , andThen, andMap, sequence
-    , keep, ignore, lookAhead, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, chainl, chainr, count, between, parens, braces, brackets
+    , keep, ignore, lookAhead, notFollowedBy, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, upTo, chainl, chainr, count, between, parens, braces, brackets
     , withState, putState, modifyState, withLocation, withLine, withColumn, withSourceLine, modifyInput, putInput, modifyPosition, putPosition
     , currentLocation, currentSourceLine, currentLine, currentColumn, currentStream
     )
@@ -68,7 +68,7 @@ into concrete Elm values.
 
 ### Parser Combinators
 
-@docs keep, ignore, lookAhead, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, chainl, chainr, count, between, parens, braces, brackets
+@docs keep, ignore, lookAhead, notFollowedBy, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, upTo, chainl, chainr, count, between, parens, braces, brackets
 
 
 ### State Combinators
@@ -1082,6 +1082,35 @@ lookAhead p =
                     err
 
 
+{-| Succeed if the given parser fails, without consuming any input.
+Useful for implementing keyword parsers that don't match prefixes.
+
+    import Combine.Char exposing (alphaNum)
+
+    keyword : String -> Parser s String
+    keyword kw =
+        string kw
+            |> ignore (notFollowedBy alphaNum)
+
+    parse (keyword "if") "if x"
+    -- Ok "if"
+
+    parse (keyword "if") "iffy"
+    -- Err ["unexpected alphanumeric character"]
+
+-}
+notFollowedBy : Parser s a -> Parser s ()
+notFollowedBy p =
+    Parser <|
+        \state stream ->
+            case app p state stream of
+                ( _, _, Ok _ ) ->
+                    ( state, stream, Err [ "unexpected input" ] )
+
+                ( _, _, Err _ ) ->
+                    ( state, stream, Ok () )
+
+
 {-| Choose between two parsers.
 
     parse (or (string "a") (string "b")) "a"
@@ -1400,6 +1429,70 @@ skipMany p =
 skipMany1 : Parser s x -> Parser s ()
 skipMany1 p =
     many1 (skip p) |> onsuccess ()
+
+
+{-| Skip input until the given parser succeeds.
+This is similar to `manyTill`, but more efficient as it doesn't
+accumulate results.
+
+    parse
+        (skipUntil (string "-->") |> keep (string "-->"))
+        "some text here-->"
+    -- Ok "-->"
+
+-}
+skipUntil : Parser s end -> Parser s ()
+skipUntil end_ =
+    let
+        accumulate state stream =
+            case app end_ state stream of
+                ( rstate, rstream, Ok _ ) ->
+                    ( rstate, rstream, Ok () )
+
+                ( estate, estream, Err _ ) ->
+                    case String.uncons stream.input of
+                        Just ( _, rest ) ->
+                            accumulate state { stream | input = rest, position = stream.position + 1 }
+
+                        Nothing ->
+                            ( estate, estream, Err [ "skipUntil: reached end of input without finding end parser" ] )
+    in
+    Parser accumulate
+
+
+{-| Parse at most `n` occurrences of a parser.
+Similar to `many`, but with an upper limit.
+
+    parse (upTo 3 (string "a")) "aaaaa"
+    -- Ok ["a", "a", "a"]
+
+    parse (upTo 3 (string "a")) "aa"
+    -- Ok ["a", "a"]
+
+    parse (upTo 3 (string "a")) "b"
+    -- Ok []
+
+-}
+upTo : Int -> Parser s a -> Parser s (List a)
+upTo n p =
+    let
+        accumulate remaining acc state stream =
+            if remaining <= 0 then
+                ( state, stream, Ok (List.reverse acc) )
+
+            else
+                case app p state stream of
+                    ( rstate, rstream, Ok res ) ->
+                        if stream.input == rstream.input then
+                            ( rstate, rstream, Ok (List.reverse acc) )
+
+                        else
+                            accumulate (remaining - 1) (res :: acc) rstate rstream
+
+                    _ ->
+                        ( state, stream, Ok (List.reverse acc) )
+    in
+    Parser <| \state stream -> accumulate n [] state stream
 
 
 {-| Parse one or more occurrences of `p` separated by `op`, recursively

@@ -1295,8 +1295,8 @@ manyTill p end_ =
                             else
                                 accumulate (res :: acc) rstate rstream
 
-                        ( pstate, pstream, Err _ ) ->
-                            if pstream.input == "" then
+                        ( _, _, Err _ ) ->
+                            if stream.input == "" then
                                 ( estate, estream, Err [ "manyTill: reached end of input without finding end parser" ] )
 
                             else

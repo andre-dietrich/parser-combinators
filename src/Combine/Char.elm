@@ -1,4 +1,4 @@
-module Combine.Char exposing (satisfy, char, anyChar, oneOf, noneOf, space, tab, newline, crlf, eol, lower, upper, digit, octDigit, hexDigit, alpha, alphaNum)
+module Combine.Char exposing (satisfy, char, anyChar, peekChar, oneOf, noneOf, space, tab, newline, crlf, eol, lower, upper, digit, octDigit, hexDigit, alpha, alphaNum)
 
 {-| This module contains `Char`-specific Parsers.
 
@@ -10,7 +10,7 @@ much faster.
 
 # Parsers
 
-@docs satisfy, char, anyChar, oneOf, noneOf, space, tab, newline, crlf, eol, lower, upper, digit, octDigit, hexDigit, alpha, alphaNum
+@docs satisfy, char, anyChar, peekChar, oneOf, noneOf, space, tab, newline, crlf, eol, lower, upper, digit, octDigit, hexDigit, alpha, alphaNum
 
 -}
 
@@ -90,6 +90,31 @@ charList chars =
 anyChar : Parser s Char
 anyChar =
     satisfy (always True) |> onerror "expected any character"
+
+
+{-| Peek at the next character without consuming any input.
+Returns `Nothing` if at end of input.
+
+    parse peekChar "abc" ==
+    -- Ok (Just 'a')
+
+    parse (peekChar |> Combine.ignore (char 'a')) "abc" ==
+    -- Ok (Just 'a')
+
+    parse peekChar "" ==
+    -- Ok Nothing
+
+-}
+peekChar : Parser s (Maybe Char)
+peekChar =
+    primitive <|
+        \state stream ->
+            case String.uncons stream.input of
+                Just ( c, _ ) ->
+                    ( state, stream, Ok (Just c) )
+
+                Nothing ->
+                    ( state, stream, Ok Nothing )
 
 
 {-| Parse a character from the given list.

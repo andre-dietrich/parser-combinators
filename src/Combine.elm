@@ -6,7 +6,7 @@ module Combine exposing
     , regex, regexSub, regexWith, regexWithSub
     , map, onsuccess, mapError, onerror
     , andThen, andMap, sequence
-    , keep, ignore, lookAhead, notFollowedBy, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, upTo, chainl, chainr, count, between, parens, braces, brackets
+    , keep, ignore, lookAhead, notFollowedBy, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, skipWhile, atLeast, upTo, chainl, chainr, count, between, parens, braces, brackets
     , withState, putState, modifyState, withLocation, withLine, withColumn, withSourceLine, modifyInput, putInput, modifyPosition, putPosition
     , currentLocation, currentSourceLine, currentLine, currentColumn, currentStream
     )
@@ -68,7 +68,7 @@ into concrete Elm values.
 
 ### Parser Combinators
 
-@docs keep, ignore, lookAhead, notFollowedBy, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, upTo, chainl, chainr, count, between, parens, braces, brackets
+@docs keep, ignore, lookAhead, notFollowedBy, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, skipWhile, atLeast, upTo, chainl, chainr, count, between, parens, braces, brackets
 
 
 ### State Combinators
@@ -1460,6 +1460,62 @@ skipUntil end_ =
     Parser accumulate
 
 
+{-| Skip characters while the predicate holds.
+More efficient than `skipMany (satisfy pred)` as it doesn't build a list.
+
+    import Combine.Char exposing (space)
+
+    parse
+        (skipWhile ((==) ' ') |> keep (string "hello"))
+        "    hello"
+    -- Ok "hello"
+
+    parse (skipWhile Char.isDigit) "123abc"
+    -- Ok ()
+
+-}
+skipWhile : (Char -> Bool) -> Parser s ()
+skipWhile pred =
+    Parser <|
+        \state stream ->
+            let
+                skipChars input pos =
+                    case String.uncons input of
+                        Just ( c, rest ) ->
+                            if pred c then
+                                skipChars rest (pos + 1)
+
+                            else
+                                ( input, pos )
+
+                        Nothing ->
+                            ( input, pos )
+
+                ( remainingInput, newPos ) =
+                    skipChars stream.input stream.position
+            in
+            ( state, { stream | input = remainingInput, position = newPos }, Ok () )
+
+
+{-| Parse at least `n` occurrences of a parser.
+Complements `upTo` for full bounded repetition control.
+
+    parse (atLeast 2 (string "a")) "aaa"
+    -- Ok ["a", "a", "a"]
+
+    parse (atLeast 2 (string "a")) "a"
+    -- Err ["expected \"a\""]
+
+    parse (atLeast 0 (string "a")) "b"
+    -- Ok []
+
+-}
+atLeast : Int -> Parser s a -> Parser s (List a)
+atLeast n p =
+    count n p
+        |> andThen (\initial -> many p |> map (\rest -> initial ++ rest))
+
+
 {-| Parse at most `n` occurrences of a parser.
 Similar to `many`, but with an upper limit.
 
@@ -1471,6 +1527,11 @@ Similar to `many`, but with an upper limit.
 
     parse (upTo 3 (string "a")) "b"
     -- Ok []
+
+Combine with `atLeast` for bounded repetition:
+
+    between2And4 p =
+        atLeast 2 p |> andThen (\_ -> upTo 4 p)
 
 -}
 upTo : Int -> Parser s a -> Parser s (List a)

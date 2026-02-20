@@ -92,18 +92,20 @@ import String
   - `data` is the initial input provided by the user
   - `input` is the remainder after running a parse
   - `position` is the starting position of `input` in `data` after a parse
+  - `lazyDepth` tracks consecutive lazy calls without input consumption (for infinite loop detection)
 
 -}
 type alias InputStream =
     { data : String
     , input : String
     , position : Int
+    , lazyDepth : Int
     }
 
 
 initStream : String -> InputStream
 initStream s =
-    InputStream s s 0
+    InputStream s s 0 0
 
 
 {-| A record representing the current parse location in an InputStream.
@@ -306,11 +308,34 @@ snippet in your code to circumvent this problem:
     recursion x =
         \() -> recursion x
 
+This function also includes infinite loop detection by tracking the depth
+of consecutive lazy calls without input consumption.
+
 -}
-lazy : (() -> Parser s a) -> Parser s a
-lazy t =
+lazy : Maybe Int -> (() -> Parser s a) -> Parser s a
+lazy lazyDepth t =
     --    RecursiveParser (L.lazy (\() -> app (t ())))
-    Parser <| \state stream -> app (t ()) state stream
+    Parser <|
+        \state stream ->
+            let
+                depth =
+                    stream.lazyDepth
+            in
+            if depth > Maybe.withDefault 1000 lazyDepth then
+                ( state, stream, Err [ "infinite loop detected: lazy recursion depth exceeded" ] )
+
+            else
+                case app (t ()) state { stream | lazyDepth = depth + 1 } of
+                    ( rstate, rstream, Ok res ) ->
+                        -- Reset depth if we consumed input, otherwise keep incrementing
+                        if stream.input == rstream.input then
+                            ( rstate, { rstream | lazyDepth = depth + 1 }, Ok res )
+
+                        else
+                            ( rstate, { rstream | lazyDepth = 0 }, Ok res )
+
+                    ( estate, estream, Err ms ) ->
+                        ( estate, { estream | lazyDepth = 0 }, Err ms )
 
 
 {-| Transform both the result and error message of a parser.

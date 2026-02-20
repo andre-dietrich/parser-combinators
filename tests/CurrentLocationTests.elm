@@ -19,22 +19,22 @@ entryPoint =
     describe "entry point"
         [ test "column should be zero with empty input" <|
             \() ->
-                { data = "", input = "", position = 0 }
+                { data = "", input = "", position = 0, lazyDepth = 0 }
                     |> Combine.currentColumn
                     |> Expect.equal 0
         , test "column should be zero with two lines" <|
             \() ->
-                { data = "\n", input = "\n", position = 0 }
+                { data = "\n", input = "\n", position = 0, lazyDepth = 0 }
                     |> Combine.currentColumn
                     |> Expect.equal 0
         , fuzz Fuzz.string "column should be zero" <|
             \s ->
-                { data = s, input = s, position = 0 }
+                { data = s, input = s, position = 0, lazyDepth = 0 }
                     |> Combine.currentColumn
                     |> Expect.equal 0
         , fuzz Fuzz.string "line should be zero" <|
             \s ->
-                { data = s, input = s, position = 0 }
+                { data = s, input = s, position = 0, lazyDepth = 0 }
                     |> Combine.currentLine
                     |> Expect.equal 0
         ]
@@ -45,12 +45,12 @@ specificLocationTests =
     describe "specific locations"
         [ test "should not skip to next line on eol" <|
             \() ->
-                { data = "x\ny", input = "x\ny", position = 1 }
+                { data = "x\ny", input = "x\ny", position = 1, lazyDepth = 0 }
                     |> Combine.currentLocation
                     |> Expect.equal { source = "x", line = 0, column = 1 }
         , test "should skip to next line on eol + 1" <|
             \() ->
-                { data = "x\ny", input = "x\ny", position = 2 }
+                { data = "x\ny", input = "x\ny", position = 2, lazyDepth = 0 }
                     |> Combine.currentLocation
                     |> Expect.equal { source = "y", line = 1, column = 0 }
         ]

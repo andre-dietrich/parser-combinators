@@ -30,45 +30,55 @@ import String
 
 -}
 satisfy : (Char -> Bool) -> Parser s Char
-satisfy pred =
+satisfy =
+    satisfyWith "could not satisfy predicate"
+
+
+{-| `satisfy` with a custom error message, this saves the extra `onerror`
+wrapper for every parsed character.
+-}
+satisfyWith : String -> (Char -> Bool) -> Parser s Char
+satisfyWith message pred =
+    let
+        error =
+            [ message ]
+    in
     primitive <|
         \state stream ->
-            let
-                message =
-                    "could not satisfy predicate"
-            in
             case String.uncons stream.input of
                 Just ( h, rest ) ->
                     if pred h then
-                        ( state, { stream | input = rest, position = stream.position + 1 }, Ok h )
+                        ( state, { stream | input = rest, position = stream.position + charWidth h }, Ok h )
 
                     else
-                        ( state, stream, Err [ message ] )
+                        ( state, stream, Err error )
 
                 Nothing ->
-                    ( state, stream, Err [ message ] )
+                    ( state, stream, Err error )
+
+
+{-| Characters outside of the Basic Multilingual Plane occupy two UTF-16 code
+units, this keeps `position` consistent with `Combine.string` and `regex`.
+-}
+charWidth : Char -> Int
+charWidth c =
+    if Char.toCode c > 0xFFFF then
+        2
+
+    else
+        1
 
 
 {-| Parse an exact character match.
 
     parse (char 'a') "a" --> Ok 'a'
 
-    parse (char 'a') "b" --> Err ["expected 'a'"]
-
-    -- You can write the expected result on the next line,
-
-    add 41 1
-    --> 42
-
-    -- You can write the expected result on the next line,
-
-    add 41 1
-    --> 42
+    parse (char 'a') "b" --> Err ["expected a"]
 
 -}
 char : Char -> Parser s Char
 char c =
-    satisfy ((==) c) |> onerror ("expected " ++ String.fromChar c)
+    satisfyWith ("expected " ++ String.fromChar c) ((==) c)
 
 
 charList : List Char -> String
@@ -89,7 +99,7 @@ charList chars =
 -}
 anyChar : Parser s Char
 anyChar =
-    satisfy (always True) |> onerror "expected any character"
+    satisfyWith "expected any character" (always True)
 
 
 {-| Peek at the next character without consuming any input.
@@ -128,8 +138,7 @@ peekChar =
 -}
 oneOf : List Char -> Parser s Char
 oneOf cs =
-    satisfy (flip List.member cs)
-        |> onerror ("expected one of " ++ charList cs)
+    satisfyWith ("expected one of " ++ charList cs) (flip List.member cs)
 
 
 {-| Parse a character that is not in the given list.
@@ -143,7 +152,7 @@ oneOf cs =
 -}
 noneOf : List Char -> Parser s Char
 noneOf cs =
-    satisfy (not << flip List.member cs) |> onerror ("expected none of " ++ charList cs)
+    satisfyWith ("expected none of " ++ charList cs) (not << flip List.member cs)
 
 
 {-| Parse a space character.
@@ -155,7 +164,7 @@ noneOf cs =
 -}
 space : Parser s Char
 space =
-    satisfy ((==) ' ') |> onerror "expected a space"
+    satisfyWith "expected a space" ((==) ' ')
 
 
 {-| Parse a `\t` character.
@@ -167,7 +176,7 @@ space =
 -}
 tab : Parser s Char
 tab =
-    satisfy ((==) '\t') |> onerror "expected a tab"
+    satisfyWith "expected a tab" ((==) '\t')
 
 
 {-| Parse a `\n` character.
@@ -179,7 +188,7 @@ tab =
 -}
 newline : Parser s Char
 newline =
-    satisfy ((==) '\n') |> onerror "expected a newline"
+    satisfyWith "expected a newline" ((==) '\n')
 
 
 {-| Parse a `\r\n` sequence, returning a `\n` character.
@@ -202,9 +211,7 @@ crlf =
 
     parse eol "\u{000D}\n" == Ok '\n'
 
-    parse eol "\u{000D}" == Ok '\n'
-
-    parse eol "a" == Err [ "expected an end of line character" ]
+    parse eol "a" == Err [ "expected a newline", "expected CRLF" ]
 
 -}
 eol : Parser s Char
@@ -221,7 +228,7 @@ eol =
 -}
 lower : Parser s Char
 lower =
-    satisfy Char.isLower |> onerror "expected a lowercase character"
+    satisfyWith "expected a lowercase character" Char.isLower
 
 
 {-| Parse any uppercase character.
@@ -233,7 +240,7 @@ lower =
 -}
 upper : Parser s Char
 upper =
-    satisfy Char.isUpper |> onerror "expected an uppercase character"
+    satisfyWith "expected an uppercase character" Char.isUpper
 
 
 {-| Parse any base 10 digit.
@@ -247,7 +254,7 @@ upper =
 -}
 digit : Parser s Char
 digit =
-    satisfy Char.isDigit |> onerror "expected a digit"
+    satisfyWith "expected a digit" Char.isDigit
 
 
 {-| Parse any base 8 digit.
@@ -261,7 +268,7 @@ digit =
 -}
 octDigit : Parser s Char
 octDigit =
-    satisfy Char.isOctDigit |> onerror "expected an octal digit"
+    satisfyWith "expected an octal digit" Char.isOctDigit
 
 
 {-| Parse any base 16 digit.
@@ -279,7 +286,7 @@ octDigit =
 -}
 hexDigit : Parser s Char
 hexDigit =
-    satisfy Char.isHexDigit |> onerror "expected a hexadecimal digit"
+    satisfyWith "expected a hexadecimal digit" Char.isHexDigit
 
 
 {-| Parse any alphabetic character.
@@ -293,7 +300,7 @@ hexDigit =
 -}
 alpha : Parser s Char
 alpha =
-    satisfy Char.isAlpha |> onerror "expected an alphabetic character"
+    satisfyWith "expected an alphabetic character" Char.isAlpha
 
 
 {-| Parse any alphanumeric character.
@@ -309,4 +316,4 @@ alpha =
 -}
 alphaNum : Parser s Char
 alphaNum =
-    satisfy Char.isAlphaNum |> onerror "expected an alphanumeric character"
+    satisfyWith "expected an alphanumeric character" Char.isAlphaNum

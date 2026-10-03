@@ -2,11 +2,11 @@ module Combine exposing
     ( Parser, InputStream, ParseLocation, ParseContext, ParseResult, ParseError, ParseOk
     , parse, runParser
     , primitive, app, lazy, trackedLazy
-    , fail, succeed, string, end, whitespace, whitespace1
+    , fail, succeed, string, strings, end, whitespace, whitespace1
     , regex, regexSub, regexWith, regexWithSub
     , map, onsuccess, mapError, onerror
     , andThen, andMap, sequence
-    , keep, ignore, lookAhead, notFollowedBy, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, skipWhile, atLeast, upTo, chainl, chainr, count, between, parens, braces, brackets
+    , keep, ignore, lookAhead, notFollowedBy, while, while1, consumed, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, takeUntil, skipWhile, atLeast, upTo, chainl, chainr, count, between, parens, braces, brackets
     , withState, putState, modifyState, withLocation, withLine, withColumn, withSourceLine, modifyInput, putInput, modifyPosition, putPosition
     , currentLocation, currentSourceLine, currentLine, currentColumn, currentStream
     )
@@ -45,7 +45,7 @@ into concrete Elm values.
 
 ## Parsers
 
-@docs fail, succeed, string, end, whitespace, whitespace1
+@docs fail, succeed, string, strings, end, whitespace, whitespace1
 
 
 ### Regular Expressions
@@ -68,7 +68,7 @@ into concrete Elm values.
 
 ### Parser Combinators
 
-@docs keep, ignore, lookAhead, notFollowedBy, while, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, skipWhile, atLeast, upTo, chainl, chainr, count, between, parens, braces, brackets
+@docs keep, ignore, lookAhead, notFollowedBy, while, while1, consumed, or, choice, optional, maybe, many, many1, manyTill, many1Till, sepBy, sepBy1, sepEndBy, sepEndBy1, skip, skipMany, skipMany1, skipUntil, takeUntil, skipWhile, atLeast, upTo, chainl, chainr, count, between, parens, braces, brackets
 
 
 ### State Combinators
@@ -83,7 +83,6 @@ into concrete Elm values.
 -}
 
 import Dict exposing (Dict)
-import Flip exposing (flip)
 import Regex
 import String
 
@@ -93,7 +92,6 @@ import String
   - `data` is the initial input provided by the user
   - `input` is the remainder after running a parse
   - `position` is the starting position of `input` in `data` after a parse
-  - `lazyDepth` tracks consecutive lazy calls without input consumption (for infinite loop detection)
   - `lazyTracking` tracks depth per unique lazy parser ID (for trackedLazy)
 
 -}
@@ -308,6 +306,15 @@ function only to avoid "bad-recursion" errors or use the following example
 snippet in your code to circumvent this problem:
 recursion x =
 () -> recursion x
+
+Note that `lazy` does not protect against left recursion: a parser that calls
+itself again without consuming input first (`expr = lazy (\() -> expr |> ...)`)
+does not hang, but crashes with a stack overflow (`RangeError: Maximum call
+stack size exceeded`). Use `trackedLazy` for grammars where this can happen.
+
+Every call evaluates the thunk again, so keep the thunk cheap: refer to
+top-level parsers instead of building large combinators inside of it.
+
 -}
 lazy : (() -> Parser s a) -> Parser s a
 lazy t =
@@ -387,24 +394,6 @@ trackedLazy id maxDepth t =
                         ( estate, { estream | lazyTracking = finalTracking }, Err ms )
 
 
-{-| Transform both the result and error message of a parser.
--}
-bimap :
-    (a -> b)
-    -> (List String -> List String)
-    -> Parser s a
-    -> Parser s b
-bimap fok ferr p =
-    Parser <|
-        \state stream ->
-            case app p state stream of
-                ( rstate, rstream, Ok res ) ->
-                    ( rstate, rstream, Ok (fok res) )
-
-                ( estate, estream, Err ms ) ->
-                    ( estate, estream, Err (ferr ms) )
-
-
 
 -- State management
 -- ----------------
@@ -443,7 +432,7 @@ putState : s -> Parser s ()
 putState state =
     Parser <|
         \_ stream ->
-            app (succeed ()) state stream
+            ( state, stream, Ok () )
 
 
 {-| Modify the parser's state.
@@ -461,7 +450,7 @@ modifyState : (s -> s) -> Parser s ()
 modifyState f =
     Parser <|
         \state stream ->
-            app (succeed ()) (f state) stream
+            ( f state, stream, Ok () )
 
 
 {-| Get the current position in the input stream and pipe it into a parser.
@@ -542,29 +531,35 @@ withSourceLine f =
 currentLocation : InputStream -> ParseLocation
 currentLocation stream =
     let
-        find position currentLine_ lines =
-            case lines of
-                [] ->
-                    ParseLocation "" currentLine_ position
-
-                line :: rest ->
-                    let
-                        length =
-                            String.length line
-
-                        lengthPlusNL =
-                            length + 1
-                    in
-                    if position == length then
-                        ParseLocation line currentLine_ position
-
-                    else if position > length then
-                        find (position - lengthPlusNL) (currentLine_ + 1) rest
-
-                    else
-                        ParseLocation line currentLine_ position
+        -- only the newlines in front of the position are relevant, the current
+        -- line is then taken from its start with an anchored regex
+        ( line, lastNewline ) =
+            String.indexes "\n" (String.left stream.position stream.data)
+                |> List.foldl (\i ( n, _ ) -> ( n + 1, i )) ( 0, -1 )
     in
-    find stream.position 0 (String.split "\n" stream.data)
+    if stream.position > String.length stream.data then
+        ParseLocation "" (line + 1) (stream.position - String.length stream.data - 1)
+
+    else
+        ParseLocation
+            (restOfLine (String.dropLeft (lastNewline + 1) stream.data))
+            line
+            (stream.position - lastNewline - 1)
+
+
+restOfLine : String -> String
+restOfLine s =
+    case Regex.findAtMost 1 restOfLineRegex s of
+        [ match ] ->
+            match.match
+
+        _ ->
+            ""
+
+
+restOfLineRegex : Regex.Regex
+restOfLineRegex =
+    Regex.fromString "^[^\\n]*" |> Maybe.withDefault Regex.never
 
 
 {-| Get the current source line in the input stream.
@@ -609,7 +604,7 @@ modifyInput : (String -> String) -> Parser s ()
 modifyInput f =
     Parser <|
         \state stream ->
-            app (succeed ()) state { stream | input = f stream.input }
+            ( state, { stream | input = f stream.input }, Ok () )
 
 
 {-| Replace the remaining input with a new string.
@@ -643,7 +638,7 @@ modifyPosition : (Int -> Int) -> Parser s ()
 modifyPosition f =
     Parser <|
         \state stream ->
-            app (succeed ()) state { stream | position = f stream.position }
+            ( state, { stream | position = f stream.position }, Ok () )
 
 
 {-| Replace the parser position.
@@ -680,7 +675,14 @@ putPosition i =
 -}
 map : (a -> b) -> Parser s a -> Parser s b
 map f p =
-    bimap f identity p
+    Parser <|
+        \state stream ->
+            case app p state stream of
+                ( rstate, rstream, Ok res ) ->
+                    ( rstate, rstream, Ok (f res) )
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )
 
 
 {-| Transform the error of a parser.
@@ -695,8 +697,15 @@ map f p =
 
 -}
 mapError : (List String -> List String) -> Parser s a -> Parser s a
-mapError =
-    bimap identity
+mapError f p =
+    Parser <|
+        \state stream ->
+            case app p state stream of
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err (f ms) )
+
+                ok ->
+                    ok
 
 
 {-| Sequence two parsers, passing the result of the first parser to a
@@ -758,7 +767,19 @@ andThen f p =
 -}
 andMap : Parser s a -> Parser s (a -> b) -> Parser s b
 andMap rp lp =
-    lp |> andThen (flip map rp)
+    Parser <|
+        \state stream ->
+            case app lp state stream of
+                ( lstate, lstream, Ok f ) ->
+                    case app rp lstate lstream of
+                        ( rstate, rstream, Ok x ) ->
+                            ( rstate, rstream, Ok (f x) )
+
+                        ( estate, estream, Err ms ) ->
+                            ( estate, estream, Err ms )
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )
 
 
 {-| Run a list of parsers in sequence, accumulating the results. The
@@ -843,23 +864,106 @@ succeed res =
 -}
 string : String -> Parser s String
 string s =
+    let
+        len =
+            String.length s
+
+        error =
+            [ "expected \"" ++ s ++ "\"" ]
+    in
     Parser <|
         \state stream ->
-            if String.startsWith s stream.input then
-                let
-                    len =
-                        String.length s
-
-                    rem =
-                        String.dropLeft len stream.input
-
-                    pos =
-                        stream.position + len
-                in
-                ( state, { stream | input = rem, position = pos }, Ok s )
+            -- String.startsWith is implemented as `indexOf(s) === 0`, which
+            -- searches the whole remaining input whenever it does not match
+            if String.left len stream.input == s then
+                ( state
+                , { stream | input = String.dropLeft len stream.input, position = stream.position + len }
+                , Ok s
+                )
 
             else
-                ( state, stream, Err [ "expected \"" ++ s ++ "\"" ] )
+                ( state, stream, Err error )
+
+
+{-| Parse one of several exact strings. If more than one of them matches,
+the longest one wins, so a keyword cannot be cut off by a shorter one that
+is a prefix of it:
+
+    parse (strings [ "in", "int", "import" ]) "integer"
+    -- Ok "int"
+
+    parse (choice [ string "in", string "int" ]) "integer"
+    -- Ok "in"
+
+    parse (strings [ "if", "then" ]) "else"
+    -- Err ["expected \"if\"", "expected \"then\""]
+
+This is also faster than `choice (List.map string ...)`, since only the
+strings that start with the next character of the input are compared.
+
+-}
+strings : List String -> Parser s String
+strings candidates =
+    let
+        -- longest first, grouped by their first character
+        byFirstChar =
+            candidates
+                |> List.sortBy (String.length >> negate)
+                |> List.foldr
+                    (\str dict ->
+                        case String.uncons str of
+                            Just ( c, _ ) ->
+                                Dict.update c (Maybe.withDefault [] >> (::) str >> Just) dict
+
+                            Nothing ->
+                                dict
+                    )
+                    Dict.empty
+
+        -- an empty string always matches, but only as the last resort
+        fallback =
+            if List.member "" candidates then
+                Ok ""
+
+            else
+                Err (List.map (\str -> "expected \"" ++ str ++ "\"") candidates)
+
+        firstMatch input list =
+            case list of
+                str :: rest ->
+                    if String.left (String.length str) input == str then
+                        Ok str
+
+                    else
+                        firstMatch input rest
+
+                [] ->
+                    fallback
+    in
+    Parser <|
+        \state stream ->
+            let
+                found =
+                    case String.uncons stream.input of
+                        Just ( c, _ ) ->
+                            firstMatch stream.input (Dict.get c byFirstChar |> Maybe.withDefault [])
+
+                        Nothing ->
+                            fallback
+            in
+            case found of
+                Ok str ->
+                    let
+                        len =
+                            String.length str
+                    in
+                    ( state
+                    , { stream | input = String.dropLeft len stream.input, position = stream.position + len }
+                    , Ok str
+                    )
+
+                Err ms ->
+                    ( state, stream, Err ms )
 
 
 {-| Parse a Regex match.
@@ -875,6 +979,12 @@ every pattern unless one already exists.
     -- Err ["expected input matching Regexp /^a+/"]
 
 Use `regexWith` for more options on allowing case-insensitive or multiline.
+
+Alternatives are anchored as a whole, `regex "if|then"` behaves like
+`regex "(?:if|then)"`. Avoid nested quantifiers such as `(a+)+`: on input
+that almost matches, JavaScript's backtracking regex engine needs
+exponential time, which blocks the program and cannot be interrupted by
+the parser.
 
 -}
 regex : String -> Parser s String
@@ -990,26 +1100,40 @@ regexer input output pat =
             else
                 "^" ++ pat
 
+        -- `^a|b` would only anchor the first alternative, wrapping the pattern
+        -- into a non-capturing group anchors all of them (submatches are kept)
         compiledRegex =
-            input pattern |> Maybe.withDefault Regex.never
+            (if String.contains "|" pattern then
+                "^(?:" ++ String.dropLeft 1 pattern ++ ")"
+
+             else
+                pattern
+            )
+                |> input
+                |> Maybe.withDefault Regex.never
+
+        error =
+            [ "expected input matching Regexp /" ++ pattern ++ "/" ]
     in
     \state stream ->
         case Regex.findAtMost 1 compiledRegex stream.input of
             [ match ] ->
-                let
-                    len =
-                        String.length match.match
+                -- in multiline mode `^` also matches at the beginning of every line
+                if match.index == 0 then
+                    let
+                        len =
+                            String.length match.match
+                    in
+                    ( state
+                    , { stream | input = String.dropLeft len stream.input, position = stream.position + len }
+                    , Ok (output match)
+                    )
 
-                    rem =
-                        String.dropLeft len stream.input
-
-                    pos =
-                        stream.position + len
-                in
-                ( state, { stream | input = rem, position = pos }, Ok (output match) )
+                else
+                    ( state, stream, Err error )
 
             _ ->
-                ( state, stream, Err [ "expected input matching Regexp /" ++ pattern ++ "/" ] )
+                ( state, stream, Err error )
 
 
 {-| Consume input while the predicate matches.
@@ -1020,30 +1144,80 @@ regexer input output pat =
 -}
 while : (Char -> Bool) -> Parser s String
 while pred =
-    let
-        accumulate acc state stream =
-            case String.uncons stream.input of
-                Just ( h, rest ) ->
-                    if pred h then
-                        let
-                            pos =
-                                stream.position + 1
-                        in
-                        accumulate (h :: acc) state { stream | input = rest, position = pos }
-
-                    else
-                        ( state, stream, String.fromList (List.reverse acc) )
-
-                Nothing ->
-                    ( state, stream, String.fromList (List.reverse acc) )
-    in
     Parser <|
         \state stream ->
             let
-                ( rstate, rstream, res ) =
-                    accumulate [] state stream
+                rest =
+                    dropWhile pred stream.input
+
+                -- the length difference also counts emojis (two UTF-16 code
+                -- units) correctly, without computing it for every character
+                len =
+                    String.length stream.input - String.length rest
             in
-            ( rstate, rstream, Ok res )
+            ( state
+            , { stream | input = rest, position = stream.position + len }
+            , Ok (String.left len stream.input)
+            )
+
+
+{-| Like `while`, but at least one character has to match. Much faster than
+`many1 (satisfy pred) |> map String.fromList`, since no list is built.
+
+    parse (while1 Char.isDigit) "123abc"
+    -- Ok "123"
+
+    parse (while1 Char.isDigit) "abc"
+    -- Err ["could not satisfy predicate"]
+
+-}
+while1 : (Char -> Bool) -> Parser s String
+while1 pred =
+    Parser <|
+        \state stream ->
+            let
+                rest =
+                    dropWhile pred stream.input
+
+                len =
+                    String.length stream.input - String.length rest
+            in
+            if len == 0 then
+                ( state, stream, Err [ "could not satisfy predicate" ] )
+
+            else
+                ( state
+                , { stream | input = rest, position = stream.position + len }
+                , Ok (String.left len stream.input)
+                )
+
+
+{-| Drops the longest prefix whose characters satisfy `pred`.
+-}
+dropWhile : (Char -> Bool) -> String -> String
+dropWhile pred input =
+    case String.uncons input of
+        Just ( c, rest ) ->
+            if pred c then
+                dropWhile pred rest
+
+            else
+                input
+
+        Nothing ->
+            input
+
+
+{-| Characters outside of the Basic Multilingual Plane (emojis, ...) occupy
+two UTF-16 code units, `String.length` and `String.dropLeft` count both.
+-}
+charWidth : Char -> Int
+charWidth c =
+    if Char.toCode c > 0xFFFF then
+        2
+
+    else
+        1
 
 
 {-| Fail when the input is not empty.
@@ -1145,7 +1319,7 @@ or lp rp =
                             res
 
                         ( _, _, Err rms ) ->
-                            ( state, stream, Err (List.foldl (::) lms rms |> List.reverse) )
+                            ( state, stream, Err (lms ++ rms) )
 
 
 {-| Choose between a list of parsers.
@@ -1190,7 +1364,14 @@ choice xs =
 -}
 optional : a -> Parser s a -> Parser s a
 optional res p =
-    succeed res |> or p
+    Parser <|
+        \state stream ->
+            case app p state stream of
+                ( _, _, Err _ ) ->
+                    ( state, stream, Ok res )
+
+                ok ->
+                    ok
 
 
 {-| Wrap the return value into a `Maybe`. Returns `Nothing` on failure.
@@ -1228,26 +1409,26 @@ maybe p =
 -}
 many : Parser s a -> Parser s (List a)
 many p =
-    let
-        accumulate acc state stream =
-            case app p state stream of
-                ( rstate, rstream, Ok res ) ->
-                    if stream.input == rstream.input then
-                        ( rstate, rstream, List.reverse acc )
-
-                    else
-                        accumulate (res :: acc) rstate rstream
-
-                _ ->
-                    ( state, stream, List.reverse acc )
-    in
     Parser <|
         \state stream ->
-            let
-                ( rstate, rstream, res ) =
-                    accumulate [] state stream
-            in
-            ( rstate, rstream, Ok res )
+            manyHelp p [] state stream
+
+
+{-| Applies `p` until it fails or stops consuming input. A parser that
+succeeds without consuming would otherwise loop forever.
+-}
+manyHelp : Parser s a -> List a -> s -> InputStream -> ParseContext s (List a)
+manyHelp p acc state stream =
+    case app p state stream of
+        ( rstate, rstream, Ok res ) ->
+            if stream.input == rstream.input then
+                ( rstate, rstream, Ok (List.reverse acc) )
+
+            else
+                manyHelp p (res :: acc) rstate rstream
+
+        _ ->
+            ( state, stream, Ok (List.reverse acc) )
 
 
 {-| Parse at least one result.
@@ -1261,7 +1442,14 @@ many p =
 -}
 many1 : Parser s a -> Parser s (List a)
 many1 p =
-    p |> map (::) |> andMap (many p)
+    Parser <|
+        \state stream ->
+            case app p state stream of
+                ( rstate, rstream, Ok res ) ->
+                    manyHelp p [ res ] rstate rstream
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )
 
 
 {-| Apply the first parser zero or more times until second parser
@@ -1422,7 +1610,20 @@ skip p =
 -}
 skipMany : Parser s x -> Parser s ()
 skipMany p =
-    many (skip p) |> onsuccess ()
+    let
+        accumulate state stream =
+            case app p state stream of
+                ( rstate, rstream, Ok _ ) ->
+                    if stream.input == rstream.input then
+                        ( rstate, rstream, Ok () )
+
+                    else
+                        accumulate rstate rstream
+
+                _ ->
+                    ( state, stream, Ok () )
+    in
+    Parser accumulate
 
 
 {-| Apply a parser and skip its result at least once.
@@ -1439,14 +1640,15 @@ skipMany1 p =
     many1 (skip p) |> onsuccess ()
 
 
-{-| Skip input until the given parser succeeds.
-This is similar to `manyTill`, but more efficient as it doesn't
-accumulate results.
+{-| Skip input until the given parser succeeds, the input matched by this
+parser is consumed too. This is similar to `manyTill`, but more efficient as
+it doesn't accumulate results. If the end is a fixed string, `takeUntil` is
+much faster.
 
     parse
-        (skipUntil (string "-->") |> keep (string "-->"))
-        "some text here-->"
-    -- Ok "-->"
+        (skipUntil (string "-->") |> keep (string "rest"))
+        "some text here-->rest"
+    -- Ok "rest"
 
 -}
 skipUntil : Parser s end -> Parser s ()
@@ -1459,13 +1661,91 @@ skipUntil end_ =
 
                 ( estate, estream, Err _ ) ->
                     case String.uncons stream.input of
-                        Just ( _, rest ) ->
-                            accumulate state { stream | input = rest, position = stream.position + 1 }
+                        Just ( c, rest ) ->
+                            accumulate state { stream | input = rest, position = stream.position + charWidth c }
 
                         Nothing ->
                             ( estate, estream, Err [ "skipUntil: reached end of input without finding end parser" ] )
     in
     Parser accumulate
+
+
+{-| Take everything up to the first occurrence of the given string. The
+string itself is consumed too, but it is not part of the result. Fails
+without consuming any input, if the string does not occur.
+
+    parse (string "<!--" |> keep (takeUntil "-->")) "<!-- foo -->bar"
+    -- Ok " foo "
+
+    parse (takeUntil "*/") "no end"
+    -- Err ["takeUntil: reached end of input without finding \"*/\""]
+
+This replaces `manyTill anyChar (string "-->") |> map String.fromList` and is
+much faster, the search is done by the browser's native string search.
+
+-}
+takeUntil : String -> Parser s String
+takeUntil end_ =
+    let
+        search =
+            Regex.fromString (Regex.replace regexSpecialChars (\m -> "\\" ++ m.match) end_)
+                |> Maybe.withDefault Regex.never
+
+        error =
+            [ "takeUntil: reached end of input without finding \"" ++ end_ ++ "\"" ]
+    in
+    Parser <|
+        \state stream ->
+            case Regex.findAtMost 1 search stream.input of
+                [ match ] ->
+                    let
+                        len =
+                            match.index + String.length end_
+                    in
+                    ( state
+                    , { stream | input = String.dropLeft len stream.input, position = stream.position + len }
+                    , Ok (String.left match.index stream.input)
+                    )
+
+                _ ->
+                    ( state, stream, Err error )
+
+
+regexSpecialChars : Regex.Regex
+regexSpecialChars =
+    Regex.fromString "[.*+?^${}()|[\\]\\\\/]" |> Maybe.withDefault Regex.never
+
+
+{-| Run a parser and return the part of the input it consumed, instead of its
+result. Combined with the `skip...` parsers, this checks the structure of a
+token without building lists of characters or strings:
+
+    import Combine.Char exposing (alpha, alphaNum)
+
+    identifier : Parser s String
+    identifier =
+        consumed (alpha |> ignore (skipWhile Char.isAlphaNum))
+
+    parse identifier "abc123 = 1"
+    -- Ok "abc123"
+
+If the parser modifies the input with `modifyInput` or `putInput`, the result
+is the prefix of the original input by which the input got shorter.
+
+-}
+consumed : Parser s a -> Parser s String
+consumed p =
+    Parser <|
+        \state stream ->
+            case app p state stream of
+                ( rstate, rstream, Ok _ ) ->
+                    ( rstate
+                    , rstream
+                    , Ok (String.left (String.length stream.input - String.length rstream.input) stream.input)
+                    )
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )
 
 
 {-| Skip characters while the predicate holds.
@@ -1487,22 +1767,13 @@ skipWhile pred =
     Parser <|
         \state stream ->
             let
-                skipChars input pos =
-                    case String.uncons input of
-                        Just ( c, rest ) ->
-                            if pred c then
-                                skipChars rest (pos + 1)
-
-                            else
-                                ( input, pos )
-
-                        Nothing ->
-                            ( input, pos )
-
-                ( remainingInput, newPos ) =
-                    skipChars stream.input stream.position
+                rest =
+                    dropWhile pred stream.input
             in
-            ( state, { stream | input = remainingInput, position = newPos }, Ok () )
+            ( state
+            , { stream | input = rest, position = stream.position + String.length stream.input - String.length rest }
+            , Ok ()
+            )
 
 
 {-| Parse at least `n` occurrences of a parser.
@@ -1536,10 +1807,19 @@ Similar to `many`, but with an upper limit.
     parse (upTo 3 (string "a")) "b"
     -- Ok []
 
-Combine with `atLeast` for bounded repetition:
+Combine with `count` for bounded repetition (`atLeast` does not work here,
+it is greedy and would consume all occurrences):
 
+    between2And4 : Parser s a -> Parser s (List a)
     between2And4 p =
-        atLeast 2 p |> andThen (\_ -> upTo 4 p)
+        count 2 p
+            |> andThen (\first -> upTo 2 p |> map ((++) first))
+
+    parse (between2And4 (string "a")) "aaaaa"
+    -- Ok ["a", "a", "a", "a"]
+
+    parse (between2And4 (string "a")) "a"
+    -- Err ["expected \"a\""]
 
 -}
 upTo : Int -> Parser s a -> Parser s (List a)
@@ -1638,37 +1918,38 @@ right-associative order to the values of `p`. See the
 chainr : Parser s (a -> a -> a) -> Parser s a -> Parser s a
 chainr op p =
     let
-        accumulate x state stream =
+        -- `pending` holds the operators with their left operand, most recent
+        -- first, so the right-associative result is built by a (stack-safe)
+        -- left fold instead of non-tail recursion
+        finish pending x =
+            List.foldl (\( f, l ) r -> f l r) x pending
+
+        accumulate pending x state stream =
             case app op state stream of
                 ( opstate, opstream, Ok f ) ->
                     if stream.input == opstream.input then
-                        ( opstate, opstream, Ok x )
+                        ( opstate, opstream, Ok (finish pending x) )
 
                     else
                         case app p opstate opstream of
                             ( pstate, pstream, Ok y ) ->
                                 if opstream.input == pstream.input then
-                                    ( pstate, pstream, Ok x )
+                                    ( pstate, pstream, Ok (finish pending x) )
 
                                 else
-                                    case accumulate y pstate pstream of
-                                        ( rstate, rstream, Ok z ) ->
-                                            ( rstate, rstream, Ok (f x z) )
-
-                                        err ->
-                                            err
+                                    accumulate (( f, x ) :: pending) y pstate pstream
 
                             ( estate, estream, Err ms ) ->
                                 ( estate, estream, Err ms )
 
                 ( _, _, Err _ ) ->
-                    ( state, stream, Ok x )
+                    ( state, stream, Ok (finish pending x) )
     in
     Parser <|
         \state stream ->
             case app p state stream of
                 ( pstate, pstream, Ok x ) ->
-                    accumulate x pstate pstream
+                    accumulate [] x pstate pstream
 
                 ( estate, estream, Err ms ) ->
                     ( estate, estream, Err ms )
@@ -1689,14 +1970,23 @@ chainr op p =
 count : Int -> Parser s a -> Parser s (List a)
 count n p =
     let
-        accumulate x acc =
+        -- a loop instead of a chain of n nested `andThen`s, which overflows
+        -- the stack for large n
+        accumulate x acc state stream =
             if x <= 0 then
-                succeed (List.reverse acc)
+                ( state, stream, Ok (List.reverse acc) )
 
             else
-                andThen (\res -> accumulate (x - 1) (res :: acc)) p
+                case app p state stream of
+                    ( rstate, rstream, Ok res ) ->
+                        accumulate (x - 1) (res :: acc) rstate rstream
+
+                    ( estate, estream, Err ms ) ->
+                        ( estate, estream, Err ms )
     in
-    accumulate n []
+    Parser <|
+        \state stream ->
+            accumulate n [] state stream
 
 
 {-| Parse something between two other parsers.
@@ -1785,7 +2075,30 @@ brackets =
 -}
 whitespace : Parser s String
 whitespace =
-    regex "\\s*" |> onerror "optional whitespace"
+    Parser <|
+        \state stream ->
+            -- most of the time there is no whitespace at all, this case is
+            -- decided without the regex, longer runs are faster with it
+            if startsWithWhitespace stream.input then
+                app whitespaceRegex state stream
+
+            else
+                ( state, stream, Ok "" )
+
+
+whitespaceRegex : Parser s String
+whitespaceRegex =
+    regex "\\s*"
+
+
+startsWithWhitespace : String -> Bool
+startsWithWhitespace input =
+    case String.uncons input of
+        Just ( c, _ ) ->
+            isWhitespace c
+
+        Nothing ->
+            False
 
 
 {-| Parse one or more whitespace characters.
@@ -1807,7 +2120,36 @@ whitespace =
 -}
 whitespace1 : Parser s String
 whitespace1 =
-    regex "\\s+" |> onerror "whitespace"
+    Parser <|
+        \state stream ->
+            if startsWithWhitespace stream.input then
+                app whitespaceRegex state stream
+
+            else
+                ( state, stream, Err [ "whitespace" ] )
+
+
+{-| The same set of characters as `\s` in JavaScript regular expressions.
+-}
+isWhitespace : Char -> Bool
+isWhitespace c =
+    let
+        code =
+            Char.toCode c
+    in
+    if code < 0xA0 then
+        code == 0x20 || (code >= 0x09 && code <= 0x0D)
+
+    else
+        (code == 0xA0)
+            || (code == 0x1680)
+            || (code >= 0x2000 && code <= 0x200A)
+            || (code == 0x2028)
+            || (code == 0x2029)
+            || (code == 0x202F)
+            || (code == 0x205F)
+            || (code == 0x3000)
+            || (code == 0xFEFF)
 
 
 {-| Variant of `mapError` that replaces the Parser's error with a List
@@ -1836,38 +2178,55 @@ onsuccess res =
     map (always res)
 
 
-{-| Join two parsers, ignoring the result of the one on the right.
-
-    unsuffix : Parser s String
-    unsuffix =
-      regex "[a-z]"
-        |> keep (regex "[!?]")
-
-    parse unsuffix "a!"
-    -- Ok "a"
-
--}
-keep : Parser s a -> Parser s x -> Parser s a
-keep p1 p2 =
-    p2
-        |> map (flip always)
-        |> andMap p1
-
-
-{-| Join two parsers, ignoring the result of the one on the left.
+{-| Join two parsers, keeping only the result of the parser passed as
+argument (the one on the right in a pipeline).
 
     unprefix : Parser s String
     unprefix =
       string ">"
-        |> ignore (while ((==) ' '))
-        |> ignore (while ((/=) ' '))
+        |> keep (while ((==) ' '))
+        |> keep (while ((/=) ' '))
 
     parse unprefix "> a"
     -- Ok "a"
 
 -}
+keep : Parser s a -> Parser s x -> Parser s a
+keep p1 p2 =
+    Parser <|
+        \state stream ->
+            case app p2 state stream of
+                ( rstate, rstream, Ok _ ) ->
+                    app p1 rstate rstream
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )
+
+
+{-| Join two parsers, ignoring the result of the parser passed as argument
+(the one on the right in a pipeline).
+
+    unsuffix : Parser s String
+    unsuffix =
+      regex "[a-z]"
+        |> ignore (regex "[!?]")
+
+    parse unsuffix "a!"
+    -- Ok "a"
+
+-}
 ignore : Parser s x -> Parser s a -> Parser s a
 ignore p1 p2 =
-    p2
-        |> map always
-        |> andMap p1
+    Parser <|
+        \state stream ->
+            case app p2 state stream of
+                ( rstate, rstream, Ok res ) ->
+                    case app p1 rstate rstream of
+                        ( fstate, fstream, Ok _ ) ->
+                            ( fstate, fstream, Ok res )
+
+                        ( estate, estream, Err ms ) ->
+                            ( estate, estream, Err ms )
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )

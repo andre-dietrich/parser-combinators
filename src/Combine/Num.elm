@@ -10,7 +10,7 @@ module Combine.Num exposing (sign, digit, int, float)
 -}
 
 import Char
-import Combine exposing (Parser, andThen, fail, map, onerror, onsuccess, optional, or, regex, string, succeed)
+import Combine exposing (Parser, app, map, onerror, onsuccess, optional, or, primitive, regex, string)
 import Combine.Char
 import String
 
@@ -61,7 +61,7 @@ digit =
 int : Parser s Int
 int =
     regex "-?(?:0|[1-9]\\d*)"
-        |> andThen (String.toInt >> unwrap)
+        |> convert String.toInt
         |> onerror "expected an int"
 
 
@@ -77,15 +77,25 @@ int =
 float : Parser s Float
 float =
     regex "-?(?:0|[1-9]\\d*)\\.\\d+"
-        |> andThen (String.toFloat >> unwrap)
+        |> convert String.toFloat
         |> onerror "expected a float"
 
 
-unwrap : Maybe v -> Parser s v
-unwrap value =
-    case value of
-        Just v ->
-            succeed v
+{-| Converts the matched string, without `andThen` creating a new parser for
+every parsed number.
+-}
+convert : (String -> Maybe v) -> Parser s String -> Parser s v
+convert f p =
+    primitive <|
+        \state stream ->
+            case app p state stream of
+                ( rstate, rstream, Ok str ) ->
+                    case f str of
+                        Just v ->
+                            ( rstate, rstream, Ok v )
 
-        Nothing ->
-            fail "impossible state in Combine.Num.unwrap"
+                        Nothing ->
+                            ( rstate, rstream, Err [ "impossible state in Combine.Num.unwrap" ] )
+
+                ( estate, estream, Err ms ) ->
+                    ( estate, estream, Err ms )

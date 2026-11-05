@@ -218,8 +218,9 @@ Here's how you would implement a greedy version of `manyTill` using
 
 -}
 app : Parser state res -> state -> InputStream -> ParseContext state res
-app (Parser inner) =
-    inner
+app (Parser inner) state stream =
+    -- full arity, so that the compiled A3(app, ...) calls take the fast path
+    inner state stream
 
 
 {-| Parse a string. See `runParser` if your parser needs to manage
